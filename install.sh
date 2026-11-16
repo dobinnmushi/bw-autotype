@@ -131,7 +131,7 @@ fi
 
 # ---- 足りないものの確認 ----
 missing=""
-for c in rbw rbw-agent rofi-rbw rofi dotool notify-send busctl; do
+for c in rbw rbw-agent rofi-rbw dotool notify-send busctl; do
     command -v "$c" >/dev/null 2>&1 || missing="$missing $c"
 done
 gnome-extensions info window-calls@domandoman.xyz 2>/dev/null | grep -q 'ACTIVE' || missing="$missing window-calls(GNOME-extension)"

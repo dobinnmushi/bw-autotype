@@ -1,6 +1,8 @@
 #!/usr/bin/python3 -I
 """bw-autotype 専用の rofi 中継（rofi-rbw からは PATH 上の `rofi` として呼ばれる）。
 
+設定 autotype.selector が gtk（既定）なら、rofi の代わりに自作の一覧（lib/bwselect.py）を出す。
+rofi なら次のようにして本物の rofi を呼ぶ:
 - GNOME は layer-shell に対応しないため、rofi を XWayland の普通のウィンドウ（-normal-window）で開く。
   WAYLAND_DISPLAY を外すのは rofi だけ（wl-copy などは Wayland のまま）。
 - 見た目は ~/.config/rofi/themes/bw-autotype.rasi。-dpi 1 で GNOME が XWayland に渡す Xft.dpi に合わせる。
@@ -22,6 +24,16 @@ except ValueError:
     extra = []
 if "-format" in args:
     args += [str(a) for a in extra]
+
+if bw.CONFIG["autotype"]["selector"] != "rofi":
+    import traceback
+
+    import bwselect
+    try:
+        sys.exit(bwselect.main(args))
+    except Exception:  # noqa: BLE001  一覧が落ちたら記録して「閉じた」と答える
+        bw.log("list: " + traceback.format_exc()[-600:])
+        sys.exit(1)
 
 env = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "BW_AUTOTYPE_ROFI_EXTRA")}
 theme = os.path.expanduser("~/.config/rofi/themes/bw-autotype.rasi")

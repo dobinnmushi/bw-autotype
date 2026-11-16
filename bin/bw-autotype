@@ -28,34 +28,47 @@ DEFAULT_KEYBINDINGS = ("Alt+1:type:username:tab:password,Alt+2:type:username,Alt
                        "Alt+m::menu,Alt+s:sync")
 
 
-# ---- 前面ウィンドウによる絞り込み ----
-def pick_filter(win):
+# ---- 前面ウィンドウに合う項目 ----
+def vault_items():
     r = bw.run(["rbw", "list", "--raw"])
     try:
-        items = json.loads(r.stdout) if r.returncode == 0 else []
+        return json.loads(r.stdout) if r.returncode == 0 else []
     except ValueError:
-        items = []
+        return []
 
-    # ブラウザなら、アドレスバーのドメインで絞る（rofi は表示中の名前に対して絞るので、名前で当たる語を選ぶ）
+
+def site_matches(win, items):
+    """前面のウィンドウに合う項目と、rofi の絞り込み欄に入れる語。(項目のリスト, 語)。
+
+    ブラウザならアドレスバーのドメインを名前・URI に含む項目、それ以外は題名・アプリ名の語のうち
+    項目の名前・ユーザー名・フォルダに含まれる最初の語で選ぶ。
+    """
     if bw.browser_app(win):
         host = bw.browser_host(win)
         if host:
             dom = bw.base_domain(host)
-            if any(dom in (i.get("name") or "").lower() for i in items):
-                return dom
-            names = {i.get("name") for i in items
-                     if any(dom in (u or "").lower() for u in (i.get("uris") or []))}
-            if len(names) == 1:
-                return names.pop()
+            by_name = [i for i in items if dom in (i.get("name") or "").lower()]
+            by_uri = [i for i in items if any(dom in (u or "").lower() for u in (i.get("uris") or []))]
+            if by_name:
+                return by_name + [i for i in by_uri if i not in by_name], dom
+            names = {i.get("name") for i in by_uri}
+            if by_uri:
+                # rofi は表示中の名前に対して絞るので、名前が1つにまとまるときだけ名前を語にする
+                return by_uri, names.pop() if len(names) == 1 else ""
 
-    # それ以外は、題名・アプリ名の語のうち、項目の名前・ユーザー名・フォルダに含まれるもの
-    title = bw.page_title(win)
-    words = re.findall(r"\w+", f"{title} {win.get('wm_class', '').split('.')[-1]}".lower())
-    entries = [" ".join(str(i.get(k) or "") for k in ("name", "user", "folder")).lower() for i in items]
+    words = re.findall(r"\w+", f"{bw.page_title(win)} {win.get('wm_class', '').split('.')[-1]}".lower())
     for w in words:
-        if len(w) >= 3 and w not in STOPWORDS and any(w in e for e in entries):
-            return w
-    return ""
+        if len(w) < 3 or w in STOPWORDS:
+            continue
+        hits = [i for i in items
+                if w in " ".join(str(i.get(k) or "") for k in ("name", "user", "folder")).lower()]
+        if hits:
+            return hits, w
+    return [], ""
+
+
+def item_key(i):
+    return [i.get("folder") or "", i.get("name") or "", i.get("user") or ""]
 
 
 # ---- キー説明 ----
@@ -85,52 +98,72 @@ def read_keybindings():
     return DEFAULT_KEYBINDINGS
 
 
-def help_message():
-    typing, copying, cards, other = (bw.tr("入力", "Type"), bw.tr("コピー", "Copy"),
-                                     bw.tr("カード等", "Cards etc."), bw.tr("その他", "Other"))
-    groups = {typing: [], copying: [], cards: [], other: []}
+def help_rows():
+    """キー説明の中身: ({見出し: [(キー, 説明)]}, 最後の1行)。"""
+    typing, copying, other = bw.tr("入力", "Type"), bw.tr("コピー", "Copy"), bw.tr("その他", "Other")
+    groups = {typing: [], copying: [], other: []}
     for kb in read_keybindings().split(","):
         parts = kb.strip().split(":")
         if len(parts) < 2:
             continue
         key, action, targets = parts[0], parts[1], [t for t in parts[2:] if t]
         if "menu" in targets:
-            groups[other].append((key, bw.tr("項目を選んでから、入れる中身を選ぶ", "pick an item, then choose what to type")))
+            groups[other].append((key, bw.tr("中身を選んで入力", "choose what to type")))
         elif action == "sync":
-            groups[other].append((key, bw.tr("保管庫をサーバーと同期", "sync the vault with the server")))
+            groups[other].append((key, bw.tr("同期", "sync")))
         elif action in ("type", "copy"):
             names = [TARGET_NAMES.get(t, t) for t in targets]
-            label = (" → ".join(names) if len(names) > 1 else bw.tr(f"{names[0]}だけ", f"{names[0]} only") if names
-                     else bw.tr("既定の中身", "default"))
+            if action == "copy" or len(names) > 1:
+                label = "→".join(names)
+            else:
+                label = bw.tr(f"{names[0]}だけ", f"{names[0]} only") if names else bw.tr("既定の中身", "default")
             if action == "type" and targets == ["username", "tab", "password"]:
-                key = f"Enter / {key}"
-            if action == "copy":
-                label = " → ".join(names)
+                key = f"Enter/{key}"
             groups[typing if action == "type" else copying].append((key, label))
     if not any(k.startswith("Enter") for k, _ in groups[typing]):
-        groups[typing].insert(0, ("Enter", " → ".join(TARGET_NAMES[t] for t in ("username", "tab", "password"))))
+        groups[typing].insert(0, ("Enter", "→".join(TARGET_NAMES[t] for t in ("username", "tab", "password"))))
     secs = int(bw.CONFIG["autotype"]["clear_clipboard_seconds"])
     if groups[copying] and secs > 0:
-        groups[copying].append(("", bw.tr(f"（コピーは{secs}秒後に消える）", f"(copies are cleared after {secs}s)")))
-    groups[cards] = [
-        ("Enter", bw.tr("カード: 番号 → Tab → 有効期限 → Tab → コード（月・年を別々に入れるときは Alt+m）",
-                        "card: number → Tab → expiry → Tab → code (Alt+m for month and year separately)")),
-        ("Enter", bw.tr("個人情報: 入れる中身を選ぶ", "identity: choose what to type")),
-    ]
+        groups[copying].append(("", bw.tr(f"（{secs}秒後に消える）", f"(cleared after {secs}s)")))
     groups[other].append(("Esc", bw.tr("閉じる", "close")))
-    groups[other].append((bw.hotkey_label(bw.CONFIG["hotkeys"]["new"]),
-                          bw.tr("新しいパスワードを作って保存（この一覧を閉じてから）",
-                                "generate and save a new password (close this list first)")))
+    groups[other].append((bw.hotkey_label(bw.CONFIG["hotkeys"]["new"]), bw.tr("新規登録", "new login")))
+    last = bw.tr("カード Enter: 番号→Tab→期限→Tab→コード（月・年は Alt+m）   個人情報 Enter: 中身を選ぶ",
+                 "Card Enter: number→Tab→expiry→Tab→code (month/year: Alt+m)   Identity Enter: choose a field")
+    return {k: v for k, v in groups.items() if v}, last
 
-    groups = {k: v for k, v in groups.items() if v}
-    keyw = max(width(k) for rows in groups.values() for k, _ in rows)
-    headw = max(width(h) for h in groups) + 2
-    lines = []
+
+def help_message():
+    """一覧の下に出すキー説明（pango マークアップ）。autotype.help が full なら列に並べ、line なら1行、none なら出さない。"""
+    mode = bw.CONFIG["autotype"]["help"]
+    if mode == "none":
+        return None
+    groups, last = help_rows()
+    dim = "<span foreground='#a0a0a0'>{}</span>"
+    if mode == "line":
+        return "  ".join(f"<b>{html.escape(k)}</b> {html.escape(label)}"
+                         for rows in groups.values() for k, label in rows if k and k != "Esc")
+
+    # 見出し・キー・説明を1つの列とし、列を横に並べる
+    columns = []
     for head, rows in groups.items():
-        for i, (k, label) in enumerate(rows):
-            h = pad(head if i == 0 else "", headw)
-            lines.append(f"<span foreground='#a0a0a0'>{html.escape(h)}</span>"
-                         f"<b>{html.escape(pad(k, keyw))}</b>  {html.escape(label)}")
+        keyw = max(width(k) for k, _ in rows)
+        cells = [(pad(head if i == 0 else "", width(head)), pad(k, keyw), label) for i, (k, label) in enumerate(rows)]
+        colw = max(width(h) + 1 + keyw + 1 + width(label) for h, _, label in cells)
+        columns.append((cells, colw))
+    height = max(len(cells) for cells, _ in columns)
+    lines = []
+    for r in range(height):
+        parts = []
+        for cells, colw in columns:
+            if r < len(cells):
+                h, k, label = cells[r]
+                text = f"{h} {k} {label}"
+                parts.append(dim.format(html.escape(h)) + f" <b>{html.escape(k)}</b> {html.escape(label)}"
+                             + " " * (colw - width(text) + 3))
+            else:
+                parts.append(" " * (colw + 3))
+        lines.append("".join(parts).rstrip())
+    lines.append(dim.format(html.escape(last)))
     return "\n".join(lines)
 
 
@@ -149,16 +182,29 @@ def main():
         bw.notify(bw.tr("中止しました（本人確認ができませんでした）", "Cancelled (could not verify your identity)"))
         return 1
 
-    extra = ["-mesg", help_message()]
+    mesg = help_message()
+    extra = ["-mesg", mesg] if mesg else []
     h = bw.recent_hash()
-    if not (h and bw.put_first(h, bw.read_runcache())):
-        term = pick_filter(win)
-        if term:
+    recent_first = bool(h and bw.put_first(h, bw.read_runcache()))
+    matches, term = site_matches(win, vault_items())
+    env_extra = {"BW_AUTOTYPE_TARGET_WIN": str(win.get("id") or "")}
+    if bw.CONFIG["autotype"]["selector"] == "rofi":
+        # rofi: 直前の項目がなければ、合う語を絞り込み欄に入れる
+        if term and not recent_first:
             extra += ["-filter", term]
+    else:
+        # 自作の一覧: 合う項目を上に並べて印を付ける（直前の項目はさらにその上）。キー説明は表にして出す
+        env_extra["BW_AUTOTYPE_SITE"] = json.dumps([item_key(i) for i in matches])
+        env_extra["BW_AUTOTYPE_RECENT"] = "1" if recent_first else ""
+        if mesg:
+            groups, last = help_rows()
+            env_extra["BW_AUTOTYPE_HELP"] = json.dumps({"mode": bw.CONFIG["autotype"]["help"],
+                                                        "groups": list(groups.items()), "last": last})
+            extra = []
     before = bw.read_runcache()
 
     layout = bw.detect_layout()
-    env = dict(bw.dotool_env(*layout), BW_AUTOTYPE_ROFI_EXTRA=json.dumps(extra))
+    env = dict(bw.dotool_env(*layout), BW_AUTOTYPE_ROFI_EXTRA=json.dumps(extra), **env_extra)
     with bw.plain_ime(*layout):
         rc = subprocess.run(["rofi-rbw", *sys.argv[1:]], env=env).returncode
     remember_used(before)

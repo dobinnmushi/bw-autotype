@@ -11,7 +11,7 @@ It is mostly a combination of existing tools glued together with thin scripts.
 | Role | Tool |
 |---|---|
 | Vault (unofficial Bitwarden client) | [rbw](https://github.com/doy/rbw) |
-| Item list, typing and copying | [rofi-rbw](https://github.com/fdw/rofi-rbw) + rofi (opened as a normal XWayland window) |
+| Item list, typing and copying | [rofi-rbw](https://github.com/fdw/rofi-rbw), with its list shown in a built-in GTK4 window (or rofi) |
 | Sending keystrokes | [dotool](https://git.sr.ht/~geb/dotool) (uinput; follows your XKB layout, so symbols are typed correctly on non-US layouts) |
 | Focused window | GNOME extension [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) |
 | URL of the current page (Firefox, Chrome, Chromium, Brave) | AT-SPI (accessibility) reads the address bar |
@@ -24,9 +24,12 @@ Other GNOME / Wayland setups should work but are less tested; reports are welcom
 
 ### Super+Alt+P — type (`bin/bw-autotype`)
 Click the field you want to fill, press the hotkey, (touch the fingerprint sensor,) pick an item.
-The list is pre-filtered by the focused app and window title (for browsers, by the domain in the address bar).
-An item used within the last 5 minutes is preselected at the top, so "username on one page,
+Items that match the focused window (for browsers, the domain in the address bar; otherwise the window title
+and app name) are listed first, marked "this site", and the first one is preselected; all other items stay below.
+An item used within the last 5 minutes comes first of all, so "username on one page,
 password on the next" is just Alt+3 the second time.
+Above the filter box, two dropdowns narrow the list by type (login, card, identity, note) and by folder,
+independently of each other and of the text you type (Alt+k / Alt+f open them). Each row shows its folder and type.
 
 | Key | Action |
 |---|---|
@@ -66,10 +69,11 @@ Both are also in the Activities overview as "Bitwarden Autotype" and "Bitwarden 
 | `[keyboard]` | XKB layout for dotool and the IBus engine used while typing (both detected automatically) |
 | `[hotkeys]` | the two hotkeys (run `./install.sh` again after changing) |
 | `[auth]` | `fingerprint`, `none` or `auto` (fingerprint if one is enrolled) |
-| `[autotype]` | how long the last item stays preselected; delay before typing; when copies are cleared |
+| `[autotype]` | how long the last item stays preselected; delay before typing; when copies are cleared; key help (`full`/`line`/`none`); list window (`gtk`/`rofi`) |
 | `[new]` | form keys (`standard` / `vim`), default password type and lengths, what to do after saving |
 
-The list's look is `config/bw-autotype.rasi`; rofi-rbw's own options are in `config/rofi-rbw.rc`.
+rofi-rbw's own options are in `config/rofi-rbw.rc`. With `autotype.selector = "rofi"` the list is shown by rofi instead
+(styled by `config/bw-autotype.rasi`, without the dropdowns; the matching word is put into the filter box).
 
 ## Security notes
 - With `auth.method = "fingerprint"`, every hotkey press asks for a fingerprint. If the sensor is unavailable or
@@ -93,19 +97,20 @@ bin/bw-autotype              the type hotkey (calls rofi-rbw)
 bin/bw-new                   the new-login hotkey (GTK4 form)
 bin/pinentry-gnome3-nograb   pinentry that does not dim the screen (optional, for rbw)
 lib/bwcommon.py              shared code (settings, identity check, focused window, browser URL, layout/IME, last item)
-lib/rofi                     rofi wrapper (XWayland, theme, -dpi 1; filter and key help on the first list only)
-lib/dotool                   dotool wrapper (waits until rofi has closed and focus has settled)
+lib/bwselect.py              the list window (GTK4; answers like rofi -dmenu, adds type/folder dropdowns)
+lib/rofi                     what rofi-rbw calls as `rofi`: the list window above, or real rofi (XWayland, theme)
+lib/dotool                   dotool wrapper (types only after the window you started from has focus again)
 lib/wl-copy                  wl-copy wrapper (drops --sensitive on old wl-clipboard; clears copies after a while)
 config/config.example.toml   settings template
 config/rofi-rbw.rc           rofi-rbw settings
-config/bw-autotype.rasi      rofi theme
+config/bw-autotype.rasi      rofi theme (only with selector = "rofi")
 applications/*.desktop.in    launcher templates (install.sh fills in @HOME@)
 ```
 
 ## Installation
 1. Packages and uinput permission (sudo)
    ```
-   sudo apt install rofi golang-go libxkbcommon-dev pipx publicsuffix
+   sudo apt install golang-go libxkbcommon-dev pipx publicsuffix   # add rofi if you want selector = "rofi"
    echo 'KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/70-uinput-uaccess.rules && sudo udevadm control --reload
    ```
    For fingerprints, enroll one in GNOME Settings (fprintd).
@@ -133,7 +138,7 @@ applications/*.desktop.in    launcher templates (install.sh fills in @HOME@)
 `./uninstall.sh` removes what `install.sh` added and prints how to undo the rest.
 
 ## Known limitations
-- GNOME does not support layer-shell, so wofi, fuzzel and the Wayland build of rofi do not work; rofi runs under XWayland.
+- GNOME does not support layer-shell, so wofi, fuzzel and the Wayland build of rofi do not work; with selector = "rofi", rofi runs under XWayland.
 - With Mozc in hiragana mode, shortcuts containing Shift do not reach GNOME (hence Super+Alt+…).
 - Chrome-based browsers expose their address bar only when started with `--force-renderer-accessibility` (`install.sh --chrome`); otherwise the list is filtered by the window title only.
 - Not supported: passkeys (see above), editing items, other desktops than GNOME.

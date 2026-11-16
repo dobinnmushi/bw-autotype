@@ -1,9 +1,11 @@
 #!/usr/bin/python3 -I
 """bw-autotype 専用の dotool 中継（rofi-rbw からは PATH 上の `dotool` として呼ばれる）。
 
-rofi が閉じてから元の入力欄にフォーカスが戻りきる前に打ち始めると、
-先頭の何文字かが別の場所に入ることがある。そこで、rofi が前面から消えるのを待ち（最大2秒）、
+一覧が閉じてから元の入力欄にフォーカスが戻りきる前に打ち始めると、
+先頭の何文字かが別の場所に入ることがある。そこで、ホットキーを押したときのウィンドウ
+（bw-autotype が BW_AUTOTYPE_TARGET_WIN で渡す）が前面に戻るのを待ち（最大2秒）、
 さらに少し待ってから本物の dotool（PATH 上の、この中継以外のもの）に標準入力をそのまま渡す。
+戻らなければ、別の場所に打たないよう入力をやめて知らせる。
 """
 import os
 import sys
@@ -12,9 +14,16 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bwcommon as bw  # noqa: E402
 
-end = time.time() + 2.0
-while time.time() < end and bw.focused_window().get("wm_class", "").lower() == "rofi":
-    time.sleep(0.05)
+target = os.environ.get("BW_AUTOTYPE_TARGET_WIN", "")
+if target.isdigit():
+    if not bw.wait_focus(int(target), seconds=2.0):
+        bw.notify(bw.tr("元のウィンドウに戻れなかったため、入力しませんでした",
+                        "Not typed: the original window did not get focus back"), urgent=True)
+        sys.exit(1)
+else:
+    end = time.time() + 2.0
+    while time.time() < end and bw.focused_window().get("wm_class", "").lower() in ("rofi", "local.bwautotype.list"):
+        time.sleep(0.05)
 time.sleep(bw.SETTLE_SECONDS)
 real = bw.which_real("dotool") or os.path.expanduser("~/.local/bin/dotool")
 os.execv(real, [real, *sys.argv[1:]])

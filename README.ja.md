@@ -11,7 +11,7 @@ Firefox の about:config・端末・普通のアプリなど、ブラウザ拡�
 | 役割 | 使うもの |
 |---|---|
 | 保管庫（Bitwarden 互換の非公式クライアント） | [rbw](https://github.com/doy/rbw) |
-| 項目一覧と入力・コピー | [rofi-rbw](https://github.com/fdw/rofi-rbw) + rofi（XWayland の普通のウィンドウとして開く） |
+| 項目一覧と入力・コピー | [rofi-rbw](https://github.com/fdw/rofi-rbw)。一覧の画面は自作の GTK4 のウィンドウ（rofi にもできる） |
 | キー入力の送信 | [dotool](https://git.sr.ht/~geb/dotool)（uinput。キーボード配列に合わせるので、US 以外の配列でも記号がずれない） |
 | 前面ウィンドウの取得 | GNOME 拡張 [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) |
 | 表示中のページの URL（Firefox・Chrome・Chromium・Brave） | AT-SPI（アクセシビリティ）でアドレスバーを読む |
@@ -24,8 +24,11 @@ Ubuntu 26.04（GNOME 50 / Wayland、jp 配列 + IBus Mozc）で作って試し�
 
 ### Super+Alt+P — 入力（`bin/bw-autotype`）
 入力したい欄をクリックしてから押す →（指紋 →）一覧から選ぶ。
-一覧は、前面のアプリ名・題名（ブラウザならアドレスバーのドメイン）で最初から絞り込まれる。
-5分以内に使った項目があれば、それが先頭に選ばれた状態で出る（ユーザー名 → 次のページでパスワード、が Alt+3 だけで済む）。
+前面のウィンドウに合う項目（ブラウザならアドレスバーのドメイン、それ以外は題名・アプリ名）が「このサイト」の印付きで上に並び、
+最初から選ばれた状態で出る。ほかの項目もその下に残る。
+5分以内に使った項目があれば、それがさらに先頭に来る（ユーザー名 → 次のページでパスワード、が Alt+3 だけで済む）。
+検索欄の上の2つのプルダウンで、種類（ログイン・カード・個人情報・メモ）とフォルダを、それぞれ独立に、検索の文字とも
+組み合わせて絞れる（Alt+k / Alt+f で開く）。各行にはフォルダと種類が出る。
 
 | キー | 動作 |
 |---|---|
@@ -74,10 +77,11 @@ Alt+m で「Expiry month」「Expiry year」を選ぶか、項目にカスタム
 | `[keyboard]` | dotool に渡す配列と、入力中に切り替える IBus エンジン（どちらも自動で判別） |
 | `[hotkeys]` | 2つのホットキー（変えたら `./install.sh` を実行し直す） |
 | `[auth]` | 本人確認。`fingerprint`・`none`・`auto`（指紋が登録されていれば fingerprint） |
-| `[autotype]` | 直前の項目を先頭に置く秒数、入力を始めるまでの待ち、コピーを消すまでの秒数 |
+| `[autotype]` | 直前の項目を先頭に置く秒数、入力を始めるまでの待ち、コピーを消すまでの秒数、キー説明（`full`/`line`/`none`）、一覧の画面（`gtk`/`rofi`） |
 | `[new]` | フォームの操作（`standard` / `vim`）、パスワードの種類と長さの既定、保存後の動作 |
 
-一覧の見た目は `config/bw-autotype.rasi`、rofi-rbw 自体の設定は `config/rofi-rbw.rc`。
+rofi-rbw 自体の設定は `config/rofi-rbw.rc`。`autotype.selector = "rofi"` にすると一覧を rofi で出す
+（見た目は `config/bw-autotype.rasi`。プルダウンはなく、合う語を絞り込み欄に入れる）。
 
 ## 安全のための決まり
 - `auth.method = "fingerprint"` なら、ホットキーのたびに指紋を求める。指紋が使えない・一致しないときは、
@@ -101,19 +105,20 @@ bin/bw-autotype              入力のホットキーの本体（rofi-rbw を呼
 bin/bw-new                   新規登録のホットキーの本体（GTK4 のフォーム）
 bin/pinentry-gnome3-nograb   画面を暗転させない pinentry（任意。rbw の設定で使う）
 lib/bwcommon.py              共通部分（設定・本人確認・前面ウィンドウ・ブラウザの URL・配列と IME・直前の項目）
-lib/rofi                     rofi の中継（XWayland・テーマ・-dpi 1、最初の一覧にだけ絞り込み語とキー説明を付ける）
-lib/dotool                   dotool の中継（rofi が閉じて前面が落ち着くまで待つ）
+lib/bwselect.py              一覧の画面（GTK4。rofi -dmenu と同じ約束で答え、種類・フォルダのプルダウンを足す）
+lib/rofi                     rofi-rbw が `rofi` として呼ぶもの。上の一覧か、本物の rofi（XWayland・テーマ）を出す
+lib/dotool                   dotool の中継（ホットキーを押したときのウィンドウが前面に戻ってから打つ）
 lib/wl-copy                  wl-copy の中継（古い wl-clipboard では --sensitive を外す。コピーをしばらくして消す）
 config/config.example.toml   設定ファイルの見本
 config/rofi-rbw.rc           rofi-rbw の設定
-config/bw-autotype.rasi      rofi のテーマ
+config/bw-autotype.rasi      rofi のテーマ（selector = "rofi" のときだけ）
 applications/*.desktop.in    ランチャーの雛形（@HOME@ を install.sh が埋める）
 ```
 
 ## 導入
 1. apt と uinput の権限（sudo）
    ```
-   sudo apt install rofi golang-go libxkbcommon-dev pipx publicsuffix
+   sudo apt install golang-go libxkbcommon-dev pipx publicsuffix   # selector = "rofi" にするなら rofi も
    echo 'KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/70-uinput-uaccess.rules && sudo udevadm control --reload
    ```
    指紋を使うなら、GNOME の設定で指紋を登録しておく（fprintd）。
@@ -141,7 +146,7 @@ applications/*.desktop.in    ランチャーの雛形（@HOME@ を install.sh �
 外すときは `./uninstall.sh`（自動で戻さないものは、最後に戻し方を表示する）。
 
 ## 分かっている制約
-- GNOME は layer-shell に対応しないので、wofi・fuzzel・Wayland 版の rofi は動かない（rofi は XWayland で動かす）。
+- GNOME は layer-shell に対応しないので、wofi・fuzzel・Wayland 版の rofi は動かない（selector = "rofi" のときは XWayland で動かす）。
 - Mozc が「あ」のとき、Shift を含むショートカットは GNOME に届かない（そのためホットキーは Super+Alt+…）。
 - Chrome 系のブラウザは `--force-renderer-accessibility` を付けて起動したときだけアドレスバーを読める（`install.sh --chrome`）。付けなければ題名だけで絞り込む。
 - できないこと: パスキー（上を参照）、項目の編集、GNOME 以外のデスクトップ。

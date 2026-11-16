@@ -35,6 +35,10 @@
 # settle_seconds = 0.25
 # Clear the clipboard this many seconds after copying, if it still holds the copied value (0: never)
 # clear_clipboard_seconds = 30
+# Key help below the list: "full" (in columns), "line" (one line) or "none"
+# help = "full"
+# The list window: "gtk" (built-in, with type and folder filters) or "rofi"
+# selector = "gtk"
 
 [new]
 # Keyboard handling of the new-login form:

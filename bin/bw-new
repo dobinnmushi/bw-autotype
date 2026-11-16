@@ -28,7 +28,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 tr = bw.tr
 NEW = bw.CONFIG["new"]
@@ -434,7 +434,7 @@ class Form:
 
 
 def run_form(win_info, items):
-    app = Adw.Application(application_id="local.bwnew.form")
+    app = Adw.Application(application_id="local.bwnew.form", flags=Gio.ApplicationFlags.NON_UNIQUE)
     holder = {}
 
     def activate(a):
