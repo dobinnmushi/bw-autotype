@@ -55,9 +55,9 @@ independently of each other and of the text you type (Alt+k / Alt+f open them). 
 | Alt+s | sync the vault with the server |
 | Alt+u / Alt+t / Alt+h | copy username / one-time code / cardholder name (cleared after 30 seconds) |
 
-Cards: Enter types number → Tab → expiry (YYYY-MM) → Tab → code. For forms with separate month and year fields,
-use Alt+m and pick "Expiry month" / "Expiry year", or give the item a custom field `_autotype` such as
-`number:tab:expiry month:tab:expiry year:tab:code`.
+Cards: Enter types number → Tab → expiry (YYYY-MM) → Tab → code; Alt+m picks a single field. Expiry fields
+come in many shapes (one field or two, YY or YYYY, text or dropdown), so for checkout forms in a browser the
+browser extension's card autofill, which sees what each field is, usually fits better.
 Identities: Enter opens the menu to choose a field (name, email, phone, address, …).
 
 The keys are the `keybindings` line in `config/rofi-rbw.rc`; the help shown below the list is built from it.
@@ -159,11 +159,11 @@ systemd/bw-ssh-agent.*       systemd user socket and service for bw-ssh-agent
    ```
    For fingerprints, enroll one in GNOME Settings (fprintd).
 2. rbw: put `rbw` and `rbw-agent` from `rbw_*_linux_amd64.tar.gz` on the [releases page](https://github.com/doy/rbw/releases) into `~/.local/bin`.
-3. rofi-rbw, with support for identities and separate card expiry month/year (proposed upstream; until then a fork):
+3. rofi-rbw, with support for identities and for older wl-clipboard (proposed upstream; until then a fork):
    ```
    pipx install "rofi-rbw @ git+https://github.com/dobinnmushi/rofi-rbw@identity"
    ```
-   Plain `pipx install rofi-rbw` also works, without those two features.
+   Plain `pipx install rofi-rbw` also works, without identities (bw-autotype copes with older wl-clipboard itself).
 4. Install and enable the GNOME extension Window Calls.
 5. `./install.sh --build-dotool` (builds dotool; afterwards plain `./install.sh` is enough).
    Add `--chrome` if you use Chrome, Chromium or Brave: it adds a launcher that starts the browser with

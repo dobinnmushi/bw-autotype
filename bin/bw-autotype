@@ -108,6 +108,15 @@ def read_keybindings():
     return DEFAULT_KEYBINDINGS
 
 
+def sync_key():
+    """rofi-rbw.rc の keybindings で同期に割り当てたキー（なければ空）"""
+    for kb in read_keybindings().split(","):
+        parts = kb.strip().split(":")
+        if len(parts) >= 2 and parts[1] == "sync":
+            return parts[0]
+    return ""
+
+
 def help_rows():
     """キー説明の中身: ({見出し: [(キー, 説明)]}, 最後の1行)。"""
     typing, copying, other = bw.tr("入力", "Type"), bw.tr("コピー", "Copy"), bw.tr("その他", "Other")
@@ -137,8 +146,8 @@ def help_rows():
         groups[copying].append(("", bw.tr(f"（{secs}秒後に消える）", f"(cleared after {secs}s)")))
     groups[other].append(("Esc", bw.tr("閉じる", "close")))
     groups[other].append((bw.hotkey_label(bw.CONFIG["hotkeys"]["new"]), bw.tr("新規登録", "new login")))
-    last = bw.tr("カード Enter: 番号→Tab→期限→Tab→コード（月・年は Alt+m）   個人情報 Enter: 中身を選ぶ",
-                 "Card Enter: number→Tab→expiry→Tab→code (month/year: Alt+m)   Identity Enter: choose a field")
+    last = bw.tr("カード Enter: 番号→Tab→期限→Tab→コード（1項目ずつは Alt+m）   個人情報 Enter: 中身を選ぶ",
+                 "Card Enter: number→Tab→expiry→Tab→code (one field: Alt+m)   Identity Enter: choose a field")
     return {k: v for k, v in groups.items() if v}, last
 
 
@@ -222,6 +231,7 @@ def main():
         env_extra["BW_AUTOTYPE_SITE"] = json.dumps([item_key(i) for i in matches])
         # 一覧の画面が rbw list をもう一度呼ばずに済むよう、項目の種類を自分しか読めないファイルで渡す
         env_extra["BW_AUTOTYPE_ITEMS"] = write_items(items)
+        env_extra["BW_AUTOTYPE_SYNC_KEY"] = sync_key()
         env_extra["BW_AUTOTYPE_RECENT"] = "1" if recent_first else ""
         if mesg:
             groups, last = help_rows()

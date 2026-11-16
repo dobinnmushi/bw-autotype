@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import bwcommon as bw
 
@@ -150,6 +151,9 @@ class Selector:
         self.app, self.opts, self.rows, self.entries = app, opts, rows, entries
         self.result = (1, "")
         self.keys = [(n, k) for n, spec in sorted(opts["keys"].items()) for k in parse_key(spec)]
+        # 同期のキー（bw-autotype が BW_AUTOTYPE_SYNC_KEY で渡す）が何番目の -kb-custom か
+        sync_spec = os.environ.get("BW_AUTOTYPE_SYNC_KEY", "")
+        self.sync_n = next((n for n, spec in opts["keys"].items() if spec == sync_spec), None) if entries else None
 
         self.win = Gtk.ApplicationWindow(application=app, title=TITLE)
         self.win.set_default_size(960, 600)
@@ -193,6 +197,8 @@ class Selector:
         for r in rows:
             self.listbox.append(self._row_widget(r))
         self.listbox.set_filter_func(self._visible)
+        if entries:
+            self.listbox.set_placeholder(self._not_found())
         scroll = Gtk.ScrolledWindow(child=self.listbox, vexpand=True,
                                     hscrollbar_policy=Gtk.PolicyType.NEVER)
         outer.append(scroll)
@@ -209,9 +215,10 @@ class Selector:
         key.connect("key-pressed", self.on_key)
         self.win.add_controller(key)
         self.win.connect("close-request", lambda *_: (self.finish(1, ""), True)[1])
+        self.restore_state()
         self.refilter()
         self.win.present()
-        self.entry.grab_focus()
+        self.entry.grab_focus_without_selecting()
 
     def _help(self):
         """bw-autotype が BW_AUTOTYPE_HELP で渡したキー説明を表にする。なければ None。"""
@@ -240,6 +247,61 @@ class Selector:
         box.append(grid)
         box.append(Gtk.Label(label=data["last"], xalign=0, css_classes=["bw-help", "dim-label"], wrap=True))
         return box
+
+    def _not_found(self):
+        """1件も合わないときに一覧の場所に出すもの（同期のキーがあれば、同期して探し直すボタンも）"""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=24, margin_bottom=24,
+                      halign=Gtk.Align.CENTER)
+        box.append(Gtk.Label(label=tr("見つかりません", "Nothing found"), css_classes=["dim-label"]))
+        if self.sync_n is not None:
+            key = os.environ.get("BW_AUTOTYPE_SYNC_KEY", "")
+            button = Gtk.Button(label=tr(f"保管庫を同期して探し直す（{key}）", f"Sync the vault and search again ({key})"))
+            button.connect("clicked", lambda *_: self.sync())
+            box.append(button)
+        return box
+
+    # ---- 同期のあとに、絞り込みの状態を引き継ぐ ----
+    STATE_SECONDS = 30
+
+    def _state_path(self):
+        return os.path.join(bw.STATE_DIR, "list-state.json")
+
+    def save_state(self):
+        state = {"time": time.time(), "text": self.entry.get_text(),
+                 "kind": self.kind_values[self.kind_dd.get_selected()] if self.kind_dd else None,
+                 "folder": self.folder_values[self.folder_dd.get_selected()] if self.folder_dd else None}
+        os.makedirs(bw.STATE_DIR, mode=0o700, exist_ok=True)
+        with open(os.open(self._state_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
+            json.dump(state, f)
+
+    def restore_state(self):
+        if not self.entries:
+            return
+        try:
+            with open(self._state_path(), encoding="utf-8") as f:
+                state = json.load(f)
+            os.unlink(self._state_path())
+        except (OSError, ValueError):
+            return
+        if time.time() - state.get("time", 0) > self.STATE_SECONDS:
+            return
+        self.entry.set_text(state.get("text") or "")
+        self.entry.set_position(-1)
+        for dd, values, value in ((self.kind_dd, self.kind_values, state.get("kind")),
+                                  (self.folder_dd, self.folder_values, state.get("folder"))):
+            if dd is not None and value in values:
+                dd.set_selected(values.index(value))
+
+    def sync(self):
+        """同期のキーで終わる。rofi-rbw が rbw sync をしてから一覧を開き直す。絞り込みの状態は引き継ぎ、
+        項目の種類のファイルは古くなるので消す（開き直した一覧は rbw list を読み直す）"""
+        self.save_state()
+        try:
+            os.unlink(os.environ["BW_AUTOTYPE_ITEMS"])
+        except (KeyError, OSError):
+            pass
+        # rofi-rbw はキーで終わったときも行の番号を読むので、空の一覧でも 0 を返す
+        self.finish(9 + self.sync_n, "0")
 
     def _dropdown(self, bar, label, options):
         bar.append(Gtk.Label(label=label, css_classes=["dim-label"]))
@@ -311,7 +373,10 @@ class Selector:
         low = Gdk.keyval_to_lower(keyval)
         for n, (kmods, kval) in self.keys:
             if mods == (kmods & MOD_MASK) and low == kval:
-                self.choose(9 + n)
+                if n == self.sync_n:
+                    self.sync()          # 同期は、行が選ばれていなくても（一覧が空でも）できる
+                else:
+                    self.choose(9 + n)
                 return True
         if mods == Gdk.ModifierType.ALT_MASK and self.kind_dd is not None and low in (Gdk.KEY_k, Gdk.KEY_f):
             (self.kind_dd if low == Gdk.KEY_k else self.folder_dd).activate()

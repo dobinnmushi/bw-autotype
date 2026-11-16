@@ -53,9 +53,9 @@ bw-autotype は rbw と rofi-rbw の上に、足りないものを足してい�
 | Alt+s | 保管庫をサーバーと同期 |
 | Alt+u / Alt+t / Alt+h | ユーザー名 / ワンタイムコード / カード名義をコピー（30秒後に消える） |
 
-カード: Enter で「番号 → Tab → 有効期限（YYYY-MM）→ Tab → セキュリティコード」。月と年が別の欄のフォームでは、
-Alt+m で「Expiry month」「Expiry year」を選ぶか、項目にカスタムフィールド `_autotype`
-（例: `number:tab:expiry month:tab:expiry year:tab:code`）を足す。
+カード: Enter で「番号 → Tab → 有効期限（YYYY-MM）→ Tab → セキュリティコード」。Alt+m で1項目ずつ選べる。
+有効期限の欄はサイトによって形がばらばら（1つか2つか、年が2桁か4桁か、打ち込みかプルダウンか）なので、
+ブラウザでの支払いには、各欄が何かを見られるブラウザ拡張のカードの自動入力のほうが合うことが多い。
 個人情報: Enter で、入れる中身（名前・メール・電話・住所など）を選ぶメニューが開く。
 
 キーの割り当ては `config/rofi-rbw.rc` の `keybindings`。一覧の下の説明はそこから自動で作る。
@@ -163,11 +163,11 @@ systemd/bw-ssh-agent.*       bw-ssh-agent の systemd のユーザー用ソケ�
    ```
    指紋を使うなら、GNOME の設定で指紋を登録しておく（fprintd）。
 2. rbw: [GitHub のリリース](https://github.com/doy/rbw/releases)の `rbw_*_linux_amd64.tar.gz` から `rbw` と `rbw-agent` を `~/.local/bin` へ。
-3. rofi-rbw。個人情報と、カードの有効期限の月・年別入力に対応した版（本家へ提案予定。それまではフォーク）:
+3. rofi-rbw。個人情報と、古い wl-clipboard に対応した版（本家へ提案中。それまではフォーク）:
    ```
    pipx install "rofi-rbw @ git+https://github.com/dobinnmushi/rofi-rbw@identity"
    ```
-   普通の `pipx install rofi-rbw` でも動く（その2つが使えないだけ）。
+   普通の `pipx install rofi-rbw` でも動く（個人情報が使えないだけ。古い wl-clipboard には bw-autotype 側で対応している）。
 4. GNOME 拡張 Window Calls を入れて有効にする。
 5. `./install.sh --build-dotool`（dotool のビルドを含む。2回目以降は `./install.sh` だけ）。
    Chrome・Chromium・Brave を使うなら `--chrome` も付ける。アドレスバーを読むのに要る `--force-renderer-accessibility` を
