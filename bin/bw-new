@@ -49,6 +49,19 @@ KINDS = [
     # SSH キー: 保存するときに ssh-keygen で作り、保管庫の「SSH キー」の項目にする（長さ・rbw generate は使わない）
     ("ssh", tr("SSH キー（Ed25519）", "SSH key (Ed25519)"), 0, 0, 0, "", None),
 ]
+# 1段目の「種類」と、パスワードのときだけ出す2段目の「文字」。組み合わせで上の KINDS のどれかになる
+TOPS = [
+    ("password", tr("パスワード", "Password")),
+    ("passphrase", tr("パスフレーズ（英単語をつなげる）", "Passphrase (random English words)")),
+    ("ssh", tr("SSH キー（Ed25519）", "SSH key (Ed25519)")),
+]
+CHARSETS = [
+    ("symbols", tr("英数字＋記号", "Letters, digits and symbols")),
+    ("alnum", tr("英数字のみ（記号を使えないサイト用）", "Letters and digits only (for sites that reject symbols)")),
+    ("pin", tr("数字のみ（PIN 用）", "Digits only (PIN)")),
+]
+KIND_BY_ID = {k[0]: k for k in KINDS}
+
 FINISH = [
     (tr("パスワードを入力", "Type the password"), "once"),
     (tr("パスワード → Tab → パスワード（確認欄も埋める）", "Password → Tab → password (fills the confirm field too)"),
@@ -127,9 +140,15 @@ class Form:
                                tr("保管庫での項目名（例: github.com）", "Item name in the vault (e.g. github.com)"))
         self.folder = self._candidates(grid, tr("フォルダ", "Folder"), [""] + folders, "",
                                        tr("（なし）— 新しい名前を打てば作成", "(none) — type a new name to create one"))
-        self.kind = self._choice(grid, tr("種類", "Type"), [k[1] for k in KINDS], self._kind_changed,
-                                 next((i for i, k in enumerate(KINDS) if k[0] == NEW["kind"]), 0))
+        # 設定の new.kind（symbols / alnum / passphrase / pin / ssh）を、種類と文字の組に直す
+        start_charset = next((i for i, c in enumerate(CHARSETS) if c[0] == NEW["kind"]), 0)
+        start_top = 0 if NEW["kind"] in KIND_BY_ID and NEW["kind"] not in ("passphrase", "ssh") else \
+            next((i for i, t in enumerate(TOPS) if t[0] == NEW["kind"]), 0)
+        self.ssh_mode = None
+        self.kind = self._choice(grid, tr("種類", "Type"), [t[1] for t in TOPS], self._kind_changed, start_top)
         # ここから下は種類によって変わる
+        self.charset = self._choice(grid, tr("文字", "Characters"), [c[1] for c in CHARSETS], self._kind_changed,
+                                    start_charset)
         self.user = self._candidates(grid, tr("ユーザー名", "Username"), users, users[0] if users else "",
                                      tr("（なし）", "(none)"))
         self.uri = self._text(grid, "URI", f"https://{host}" if host else "",
@@ -138,7 +157,6 @@ class Form:
         self.finish_password = next((i for i, f in enumerate(FINISH) if f[1] == NEW["finish"]), 0)
         self.finish = self._choice(grid, tr("入力の仕方", "Then"), [f[0] for f in FINISH], None,
                                    self.finish_password)
-        self.ssh_mode = None
 
         # パスワードの下見（伏せ字、v で表示、r で作り直し）
         pw_row = Gtk.Box(spacing=8, margin_top=6, css_classes=["bw-row"])
@@ -316,12 +334,19 @@ class Form:
         self._goto(self.cur, keep_mode=True)
 
     def _kind_k(self):
-        return KINDS[self.kind["dd"].get_selected()]
+        """種類と文字の組から、KINDS の1つを返す"""
+        top = TOPS[self.kind["dd"].get_selected()][0]
+        if top == "password":
+            return KIND_BY_ID[CHARSETS[self.charset["dd"].get_selected()][0]]
+        return KIND_BY_ID[top]
 
     def is_ssh(self):
         return self._kind_k()[0] == "ssh"
 
     def _kind_changed(self):
+        if not hasattr(self, "length"):
+            return   # 作っている途中（下の欄がまだない）
+        self.charset["row"].set_visible(TOPS[self.kind["dd"].get_selected()][0] == "password")
         ssh = self.is_ssh()
         if ssh != self.ssh_mode:
             self.ssh_mode = ssh

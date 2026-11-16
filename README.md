@@ -54,6 +54,9 @@ On a sign-up page, click the password field, press the hotkey, (touch the sensor
 A password is generated, saved to the vault and typed into the field. Name and URI are prefilled from the browser's
 address bar. Typing a folder name that does not exist creates it.
 
+The form asks for the type first (password, passphrase or SSH key); only the fields below it change. For a
+password, the next field chooses the characters (with symbols, letters and digits only, or digits only for PINs).
+
 **SSH keys:** choose "SSH key (Ed25519)" as the type. The fields below the type change: username, URI and
 length disappear, and the key is created when you save (`ssh-keygen` in `$XDG_RUNTIME_DIR`, removed right away),
 saved to the vault as an SSH key item, and its public key is typed into the focused field (for example GitHub's
