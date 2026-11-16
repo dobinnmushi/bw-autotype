@@ -188,6 +188,7 @@ def remember_used(before):
 
 def prepare(win):
     """一覧を出すための下ごしらえ: (保管庫の項目, 合う項目, rofi 用の語)。保管庫がロック中なら項目は空"""
+    bw.sync_if_stale()
     items = vault_items()
     matches, term = site_matches(win, items)
     return items, matches, term

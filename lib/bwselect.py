@@ -168,7 +168,8 @@ class Selector:
             kinds = [k for k in TYPE_NAMES if any(r.kind == k for r in rows)]
             folders = sorted({r.key[0] for r in rows if r.key[0]}, key=str.lower)
             self.kind_values = [None, *kinds]
-            self.folder_values = [None, *folders] + ([""] if any(not r.key[0] for r in rows) and folders else [])
+            # 「フォルダなし」は、フォルダが1つでもあれば常に出す（該当する項目がなければ空の一覧になるだけ）
+            self.folder_values = [None, *folders] + ([""] if folders else [])
             self.kind_dd = self._dropdown(bar, tr("種類", "Type") + " (Alt+k)",
                                           [ALL] + [TYPE_NAMES[k] for k in kinds])
             self.folder_dd = self._dropdown(bar, tr("フォルダ", "Folder") + " (Alt+f)",

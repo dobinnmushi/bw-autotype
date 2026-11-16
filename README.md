@@ -93,7 +93,7 @@ Both are also in the Activities overview as "Bitwarden Autotype" and "Bitwarden 
 | `[keyboard]` | XKB layout for dotool and the IBus engine used while typing (both detected automatically) |
 | `[hotkeys]` | the two hotkeys (run `./install.sh` again after changing) |
 | `[auth]` | `fingerprint`, `none` or `auto` (fingerprint if one is enrolled) |
-| `[autotype]` | how long the last item stays preselected; delay before typing; when copies are cleared; key help (`full`/`line`/`none`); list window (`gtk`/`rofi`) |
+| `[autotype]` | sync before the list when the local vault is older than `sync_minutes` (10); how long the last item stays preselected; delay before typing; when copies are cleared; key help (`full`/`line`/`none`); list window (`gtk`/`rofi`) |
 | `[ssh]` | how long one confirmation covers SSH signatures |
 | `[new]` | form keys (`standard` / `vim`), default password type and lengths, what to do after saving |
 

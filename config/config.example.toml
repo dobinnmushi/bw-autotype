@@ -31,6 +31,8 @@
 # An item used within this many seconds is preselected at the top of the list
 # (username on one page, then password on the next page).
 # recent_seconds = 300
+# Run `rbw sync` before opening the list if the local copy of the vault is older than this (minutes; 0: never)
+# sync_minutes = 10
 # Wait after the original window regains focus before typing (seconds; only before the first field)
 # settle_seconds = 0.1
 # Clear the clipboard this many seconds after copying, if it still holds the copied value (0: never)

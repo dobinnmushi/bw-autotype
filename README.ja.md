@@ -99,7 +99,7 @@ Alt+m で「Expiry month」「Expiry year」を選ぶか、項目にカスタム
 | `[keyboard]` | dotool に渡す配列と、入力中に切り替える IBus エンジン（どちらも自動で判別） |
 | `[hotkeys]` | 2つのホットキー（変えたら `./install.sh` を実行し直す） |
 | `[auth]` | 本人確認。`fingerprint`・`none`・`auto`（指紋が登録されていれば fingerprint） |
-| `[autotype]` | 直前の項目を先頭に置く秒数、入力を始めるまでの待ち、コピーを消すまでの秒数、キー説明（`full`/`line`/`none`）、一覧の画面（`gtk`/`rofi`） |
+| `[autotype]` | 手元の保管庫が `sync_minutes`（10分）より古ければ一覧の前に同期、直前の項目を先頭に置く秒数、入力を始めるまでの待ち、コピーを消すまでの秒数、キー説明（`full`/`line`/`none`）、一覧の画面（`gtk`/`rofi`） |
 | `[ssh]` | SSH の署名で、一度の確認を使い回す秒数 |
 | `[new]` | フォームの操作（`standard` / `vim`）、パスワードの種類と長さの既定、保存後の動作 |
 

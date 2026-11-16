@@ -56,6 +56,7 @@ DEFAULTS = {
     },
     "autotype": {
         "recent_seconds": 300,          # この秒数以内に使った項目を一覧の先頭に置く
+        "sync_minutes": 10,             # 手元の保管庫がこの分数より古ければ、一覧を開く前に rbw sync する（0 なら しない）
         "settle_seconds": 0.1,          # 元のウィンドウが前面に戻ってから打ち始めるまでの待ち（一覧が閉じた直後の1回だけ）
         "clear_clipboard_seconds": 30,  # コピーしてからクリップボードを消すまでの秒数（0 なら消さない）
         "help": "full",                 # 一覧の下のキー説明: full（列に並べる）| line（1行）| none
@@ -425,6 +426,26 @@ def dotool_env(layout, variant):
     if variant:
         env["DOTOOL_XKB_VARIANT"] = variant
     return env
+
+
+# ---- 同期 ----
+def _rbw_db_mtime():
+    """rbw の手元の保管庫（~/.cache/rbw/*.json）の最終更新時刻。見つからなければ 0"""
+    profile = f"rbw-{os.environ['RBW_PROFILE']}" if os.environ.get("RBW_PROFILE") else "rbw"
+    d = os.path.join(CACHE_HOME, profile)
+    try:
+        return max((os.path.getmtime(os.path.join(d, n)) for n in os.listdir(d) if n.endswith(".json")), default=0)
+    except OSError:
+        return 0
+
+
+def sync_if_stale():
+    """手元の保管庫が autotype.sync_minutes 分より古ければ rbw sync する（新しく足した項目が見えるように）。
+    rbw-agent の自動の同期（sync_interval）に頼らない"""
+    minutes = float(CONFIG["autotype"]["sync_minutes"])
+    if minutes > 0 and time.time() - _rbw_db_mtime() > minutes * 60:
+        r = run(["rbw", "sync"])
+        log(f"sync: {'ok' if r.returncode == 0 else 'failed'}")
 
 
 # ---- rofi-rbw の使用回数と直前の項目 ----
