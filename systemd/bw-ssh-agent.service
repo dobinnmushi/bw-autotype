@@ -1,0 +1,7 @@
+[Unit]
+Description=bw-ssh-agent: SSH agent that asks for your fingerprint before rbw signs
+Requires=bw-ssh-agent.socket
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/bw-ssh-agent

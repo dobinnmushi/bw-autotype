@@ -70,6 +70,7 @@ Both are also in the Activities overview as "Bitwarden Autotype" and "Bitwarden 
 | `[hotkeys]` | the two hotkeys (run `./install.sh` again after changing) |
 | `[auth]` | `fingerprint`, `none` or `auto` (fingerprint if one is enrolled) |
 | `[autotype]` | how long the last item stays preselected; delay before typing; when copies are cleared; key help (`full`/`line`/`none`); list window (`gtk`/`rofi`) |
+| `[ssh]` | how long one confirmation covers SSH signatures |
 | `[new]` | form keys (`standard` / `vim`), default password type and lengths, what to do after saving |
 
 rofi-rbw's own options are in `config/rofi-rbw.rc`. With `autotype.selector = "rofi"` the list is shown by rofi instead
@@ -95,11 +96,23 @@ This tool itself does not handle passkeys (rbw 1.15 does not read them):
 - Neither this tool nor rofi-rbw ever calls `rbw edit`. Be careful with `rbw edit` yourself on items that have a
   passkey: rbw re-sends the item without its passkey data, which may remove the passkey (not verified).
 
+## SSH keys (optional)
+rbw-agent can sign SSH logins with the SSH keys in your vault, but it never asks before signing.
+`./install.sh --ssh` puts **bw-ssh-agent** in front of it: ssh and git talk to bw-ssh-agent, which passes key
+listings straight through and asks for your fingerprint (or the master password, as for typing) before each
+signature. After one confirmation it signs without asking for `ssh.confirm_seconds` (30 by default), since
+one git command may connect several times. The notification names the key and the remote user name (the
+agent protocol does not tell which host).
+
+It is a systemd socket that sets `SSH_AUTH_SOCK` after the OpenSSH, gcr and gpg agent sockets, the same way
+they do, so it wins from the next login on. Logs: `journalctl -t bw-autotype`.
+
 ## Files
 ```
 bin/bw-autotype              the type hotkey (calls rofi-rbw)
 bin/bw-new                   the new-login hotkey (GTK4 form)
 bin/pinentry-gnome3-nograb   pinentry that does not dim the screen (optional, for rbw)
+bin/bw-ssh-agent             SSH agent in front of rbw's, asks before signing (install.sh --ssh)
 lib/bwcommon.py              shared code (settings, identity check, focused window, browser URL, layout/IME, last item)
 lib/bwselect.py              the list window (GTK4; answers like rofi -dmenu, adds type/folder dropdowns)
 lib/rofi                     what rofi-rbw calls as `rofi`: the list window above, or real rofi (XWayland, theme)
@@ -109,6 +122,7 @@ config/config.example.toml   settings template
 config/rofi-rbw.rc           rofi-rbw settings
 config/bw-autotype.rasi      rofi theme (only with selector = "rofi")
 applications/*.desktop.in    launcher templates (install.sh fills in @HOME@)
+systemd/bw-ssh-agent.*       systemd user socket and service for bw-ssh-agent
 ```
 
 ## Installation

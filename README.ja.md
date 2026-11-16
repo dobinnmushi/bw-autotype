@@ -78,6 +78,7 @@ Alt+m で「Expiry month」「Expiry year」を選ぶか、項目にカスタム
 | `[hotkeys]` | 2つのホットキー（変えたら `./install.sh` を実行し直す） |
 | `[auth]` | 本人確認。`fingerprint`・`none`・`auto`（指紋が登録されていれば fingerprint） |
 | `[autotype]` | 直前の項目を先頭に置く秒数、入力を始めるまでの待ち、コピーを消すまでの秒数、キー説明（`full`/`line`/`none`）、一覧の画面（`gtk`/`rofi`） |
+| `[ssh]` | SSH の署名で、一度の確認を使い回す秒数 |
 | `[new]` | フォームの操作（`standard` / `vim`）、パスワードの種類と長さの既定、保存後の動作 |
 
 rofi-rbw 自体の設定は `config/rofi-rbw.rc`。`autotype.selector = "rofi"` にすると一覧を rofi で出す
@@ -103,11 +104,22 @@ rofi-rbw 自体の設定は `config/rofi-rbw.rc`。`autotype.selector = "rofi"` 
 - この道具も rofi-rbw も `rbw edit` は呼ばない。自分で `rbw edit` を使うときは、パスキーを持つ項目に注意。
   rbw はパスキーの欄を持たない形で項目を送り直すので、パスキーが消える恐れがある（確かめてはいない）。
 
+## SSH キー（任意）
+rbw-agent は保管庫の SSH キーで SSH のログインに署名できるが、署名の前に確認はしない。
+`./install.sh --ssh` で、その手前に **bw-ssh-agent** を置く。ssh や git は bw-ssh-agent に話しかけ、
+鍵の一覧はそのまま rbw に渡し、署名の前には指紋（だめならマスターパスワード。入力のときと同じ）を求める。
+1回の git の操作で何度も接続することがあるので、一度確認したら `ssh.confirm_seconds` 秒（既定 30）は確認しない。
+通知には鍵と接続先でのユーザー名を出す（SSH エージェントの約束では、接続先のホストは分からない）。
+
+systemd のソケットとして、OpenSSH・gcr・gpg のエージェントのソケットのあとに起動し、それらと同じ方式で
+`SSH_AUTH_SOCK` を設定するので、次にログインし直したときから使われる。記録は `journalctl -t bw-autotype`。
+
 ## 構成
 ```
 bin/bw-autotype              入力のホットキーの本体（rofi-rbw を呼ぶ）
 bin/bw-new                   新規登録のホットキーの本体（GTK4 のフォーム）
 bin/pinentry-gnome3-nograb   画面を暗転させない pinentry（任意。rbw の設定で使う）
+bin/bw-ssh-agent             rbw の SSH エージェントの前に置き、署名の前に確認する（install.sh --ssh）
 lib/bwcommon.py              共通部分（設定・本人確認・前面ウィンドウ・ブラウザの URL・配列と IME・直前の項目）
 lib/bwselect.py              一覧の画面（GTK4。rofi -dmenu と同じ約束で答え、種類・フォルダのプルダウンを足す）
 lib/rofi                     rofi-rbw が `rofi` として呼ぶもの。上の一覧か、本物の rofi（XWayland・テーマ）を出す
@@ -117,6 +129,7 @@ config/config.example.toml   設定ファイルの見本
 config/rofi-rbw.rc           rofi-rbw の設定
 config/bw-autotype.rasi      rofi のテーマ（selector = "rofi" のときだけ）
 applications/*.desktop.in    ランチャーの雛形（@HOME@ を install.sh が埋める）
+systemd/bw-ssh-agent.*       bw-ssh-agent の systemd のユーザー用ソケットとサービス
 ```
 
 ## 導入

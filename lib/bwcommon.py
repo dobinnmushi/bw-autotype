@@ -61,6 +61,9 @@ DEFAULTS = {
         "help": "full",                 # 一覧の下のキー説明: full（列に並べる）| line（1行）| none
         "selector": "gtk",              # 一覧の画面: gtk（種類・フォルダで絞れる自作の一覧）| rofi
     },
+    "ssh": {
+        "confirm_seconds": 30,          # SSH の署名で一度確認したら、この秒数は確認なしで署名する（0 なら毎回）
+    },
     "new": {
         "keys": "standard",             # standard | vim
         "kind": "symbols",              # symbols | alnum | passphrase | pin
@@ -154,10 +157,11 @@ def fingerprint_enrolled():
     return r.returncode == 0 and re.search(r"^\s*-\s*#\d+:", r.stdout, re.M) is not None
 
 
-def verify_fingerprint():
-    """指紋が一致すれば True。センサーが使えない・一致しない・時間切れなら False。"""
+def verify_fingerprint(reason=None):
+    """指紋が一致すれば True。センサーが使えない・一致しない・時間切れなら False。reason は通知の1行目に添える。"""
     tries = int(CONFIG["auth"]["fingerprint_tries"])
-    nid = notify(tr("指紋センサーに触れてください", "Touch the fingerprint sensor"))
+    touch = tr("指紋センサーに触れてください", "Touch the fingerprint sensor")
+    nid = notify(f"{reason}\n{touch}" if reason else touch)
     try:
         for left in range(tries - 1, -1, -1):
             try:
@@ -187,16 +191,19 @@ def auth_method():
     return m
 
 
-def authorize():
-    """先へ進んでよければ True。"""
+def authorize(reason=None):
+    """先へ進んでよければ True。reason（何のための確認か）は通知に添える。"""
     if run(["rbw", "unlocked"]).returncode != 0:
         # ロック中：マスターパスワードで解除（pinentry のダイアログ）。それ自体が本人確認になる
         log("auth: vault locked, unlocking with the master password")
-        return subprocess.run(["rbw", "unlock"]).returncode == 0
+        nid = notify(reason) if reason else None
+        ok = subprocess.run(["rbw", "unlock"]).returncode == 0
+        close_notification(nid)
+        return ok
     if auth_method() != "fingerprint":
         log("auth: vault unlocked, no fingerprint check (auth.method)")
         return True
-    if verify_fingerprint():
+    if verify_fingerprint(reason):
         log("auth: fingerprint ok")
         return True
     log("auth: fingerprint failed, falling back to the master password")

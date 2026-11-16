@@ -3,6 +3,7 @@
 #   ./install.sh                 リンク・ランチャー・ショートカット・設定ファイルをそろえる
 #   ./install.sh --build-dotool  上に加えて dotool をソースからビルドして ~/.local/bin に入れる
 #   ./install.sh --chrome        上に加えて、アドレスバーを読めるようにした Chrome 系のランチャーを作る
+#   ./install.sh --ssh           上に加えて、保管庫の SSH キーで署名する bw-ssh-agent を動かし、SSH_AUTH_SOCK をそこへ向ける
 # オプションは並べて指定できる。
 # 事前に必要なもの（sudo が要るものを含む）は README の「導入」（Installation）を参照。
 set -eu
@@ -21,11 +22,12 @@ link() { # link <リポジトリ内のパス> <置き先>
     ln -sfn "$src" "$dst"; msg "リンク: $dst → $src" "Linked: $dst → $src"
 }
 
-build_dotool=false chrome=false
+build_dotool=false chrome=false ssh=false
 for a in "$@"; do
     case $a in
         --build-dotool) build_dotool=true;;
         --chrome) chrome=true;;
+        --ssh) ssh=true;;
         *) msg "知らないオプション: $a" "Unknown option: $a"; exit 2;;
     esac
 done
@@ -45,6 +47,7 @@ fi
 link bin/bw-autotype             "$HOME/.local/bin/bw-autotype"
 link bin/bw-new                  "$HOME/.local/bin/bw-new"
 link bin/pinentry-gnome3-nograb  "$HOME/.local/bin/pinentry-gnome3-nograb"
+link bin/bw-ssh-agent            "$HOME/.local/bin/bw-ssh-agent"
 link lib                         "$HOME/.local/lib/bw-autotype"
 link config/rofi-rbw.rc          "${XDG_CONFIG_HOME:-$HOME/.config}/rofi-rbw.rc"
 link config/bw-autotype.rasi     "${XDG_CONFIG_HOME:-$HOME/.config}/rofi/themes/bw-autotype.rasi"
@@ -86,6 +89,20 @@ if $chrome; then
         msg "ランチャー: $dst（ブラウザを終了して開き直すと効きます）" "Launcher: $dst (quit and reopen the browser to apply)"
     done
     $found || msg "Chrome 系のブラウザが見つかりませんでした" "No Chrome-based browser found"
+fi
+
+# ---- SSH エージェント（--ssh）----
+# 他の SSH エージェントのソケットと同じく、systemd のソケットが起動したときに SSH_AUTH_SOCK を設定する。
+# GNOME のアプリはログインのときの値を受け継ぐので、効くのは次にログインし直してから。
+if $ssh; then
+    units=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+    mkdir -p "$units"
+    cp "$R/systemd/bw-ssh-agent.socket" "$R/systemd/bw-ssh-agent.service" "$units/"
+    systemctl --user daemon-reload
+    systemctl --user enable --now bw-ssh-agent.socket >/dev/null 2>&1
+    systemctl --user restart bw-ssh-agent.socket
+    msg "SSH エージェント: SSH_AUTH_SOCK=\$XDG_RUNTIME_DIR/bw-ssh-agent/socket（ログインし直すと、すべてのアプリで効く）" \
+        "SSH agent: SSH_AUTH_SOCK=\$XDG_RUNTIME_DIR/bw-ssh-agent/socket (log in again for all apps to use it)"
 fi
 
 # ---- ショートカット（既存のカスタムショートカットは消さず、足すだけ。キーは設定ファイルの [hotkeys]）----

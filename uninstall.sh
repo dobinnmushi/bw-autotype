@@ -16,9 +16,17 @@ unlink_if_ours() { # リポジトリを指すリンクのときだけ消す
 unlink_if_ours "$HOME/.local/bin/bw-autotype"
 unlink_if_ours "$HOME/.local/bin/bw-new"
 unlink_if_ours "$HOME/.local/bin/pinentry-gnome3-nograb"
+unlink_if_ours "$HOME/.local/bin/bw-ssh-agent"
 unlink_if_ours "$HOME/.local/lib/bw-autotype"
 unlink_if_ours "${XDG_CONFIG_HOME:-$HOME/.config}/rofi-rbw.rc"
 unlink_if_ours "${XDG_CONFIG_HOME:-$HOME/.config}/rofi/themes/bw-autotype.rasi"
+# install.sh --ssh で入れた SSH エージェント（止めると SSH_AUTH_SOCK の設定も外れる）
+units=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+if [ -e "$units/bw-ssh-agent.socket" ]; then
+    systemctl --user disable --now bw-ssh-agent.socket bw-ssh-agent.service 2>/dev/null || true
+    rm -fv "$units/bw-ssh-agent.socket" "$units/bw-ssh-agent.service"
+    systemctl --user daemon-reload
+fi
 rm -fv "$HOME/.local/share/applications/bw-autotype.desktop" "$HOME/.local/share/applications/bw-new.desktop"
 # install.sh --chrome で作った Chrome 系のランチャー（目印の行があるものだけ）
 for f in "$HOME"/.local/share/applications/*.desktop; do

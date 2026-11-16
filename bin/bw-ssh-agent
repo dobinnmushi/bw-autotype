@@ -1,0 +1,176 @@
+#!/usr/bin/python3 -I
+"""bw-ssh-agent: rbw-agent の SSH エージェントの前に置く中継。署名の前に本人確認をする。
+
+rbw-agent は保管庫の SSH キーで署名する SSH エージェントを持つ（$XDG_RUNTIME_DIR/rbw/ssh-agent-socket）が、
+署名のたびの確認はしない。この中継は ssh・git からの要求を受け、
+- 署名の依頼（SSH_AGENTC_SIGN_REQUEST）だけは、本人確認（指紋 → だめならマスターパスワード。ロック中なら
+  マスターパスワードで開くこと）が通ってから rbw に渡す。一度通れば ssh.confirm_seconds 秒は確認しない。
+- それ以外の要求（鍵の一覧など）は中身を見ずにそのまま rbw に渡す。鍵の一覧のときだけ、ロック中なら先に開く。
+SSH エージェントの約束（draft-ietf-sshm-ssh-agent）: どの要求・答えも「4バイトの長さ + 1バイトの種類 + 中身」。
+
+systemd のソケット（bw-ssh-agent.socket）から起動される（LISTEN_FDS）。手で動かすときは
+`bw-ssh-agent <ソケットのパス>` で、そこに待ち受ける。
+"""
+import os
+import socket
+import struct
+import sys
+import threading
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import bwcommon as bw  # noqa: E402
+
+REQUEST_IDENTITIES = 11
+IDENTITIES_ANSWER = 12
+SIGN_REQUEST = 13
+FAILURE = 5
+USERAUTH_REQUEST = 50
+
+_lock = threading.Lock()          # 本人確認は1つずつ（指紋の通知が重ならないように）
+_verified_until = 0.0
+_comments = {}                    # 鍵（公開鍵の blob）→ 鍵の説明（rbw は保管庫の項目名を返す）
+
+
+def rbw_socket():
+    profile = f"rbw-{os.environ['RBW_PROFILE']}" if os.environ.get("RBW_PROFILE") else "rbw"
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return os.path.join(runtime, profile, "ssh-agent-socket")
+
+
+def recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise EOFError
+        buf += chunk
+    return buf
+
+
+def recv_msg(sock):
+    (length,) = struct.unpack(">I", recv_exact(sock, 4))
+    return recv_exact(sock, length)
+
+
+def send_msg(sock, body):
+    sock.sendall(struct.pack(">I", len(body)) + body)
+
+
+def read_string(buf, pos):
+    (n,) = struct.unpack(">I", buf[pos:pos + 4])
+    return buf[pos + 4:pos + 4 + n], pos + 4 + n
+
+
+def describe(body):
+    """署名の依頼から、どの鍵で誰として入るかを読む（通知に出すだけ。読めなければ空）"""
+    try:
+        blob, pos = read_string(body, 1)
+        data, _ = read_string(body, pos)
+        key = _comments.get(blob, "")
+        _, p = read_string(data, 0)                 # セッション ID
+        user = ""
+        if data[p] == USERAUTH_REQUEST:
+            user, _ = read_string(data, p + 1)
+            user = user.decode(errors="replace")
+        return key, user
+    except (IndexError, struct.error):
+        return "", ""
+
+
+def remember_comments(answer):
+    try:
+        (count,) = struct.unpack(">I", answer[1:5])
+        pos = 5
+        for _ in range(count):
+            blob, pos = read_string(answer, pos)
+            comment, pos = read_string(answer, pos)
+            _comments[blob] = comment.decode(errors="replace")
+    except (IndexError, struct.error):
+        pass
+
+
+def unlocked():
+    return bw.run(["rbw", "unlocked"]).returncode == 0
+
+
+def confirm(body):
+    """署名してよければ True"""
+    global _verified_until
+    with _lock:
+        if time.time() < _verified_until:
+            return True
+        key, user = describe(body)
+        target = " ".join(x for x in (key and bw.tr(f"鍵「{key}」", f"key \"{key}\""),
+                                      user and bw.tr(f"ユーザー {user}", f"user {user}")) if x)
+        reason = bw.tr(f"SSH で署名します（{target}）" if target else "SSH で署名します",
+                       f"SSH signature ({target})" if target else "SSH signature")
+        ok = bw.authorize(reason)
+        bw.log(f"ssh: sign {'allowed' if ok else 'denied'}")
+        if ok:
+            _verified_until = time.time() + float(bw.CONFIG["ssh"]["confirm_seconds"])
+        return ok
+
+
+def serve(client):
+    global _verified_until
+    upstream = None
+    try:
+        while True:
+            body = recv_msg(client)
+            kind = body[0] if body else 0
+            if kind == REQUEST_IDENTITIES and not unlocked():
+                # 保管庫がロック中は rbw が鍵を返せない。開くこと自体を本人確認として扱う
+                with _lock:
+                    if bw.authorize(bw.tr("SSH で保管庫の鍵を使います", "SSH wants a key from your vault")):
+                        _verified_until = time.time() + float(bw.CONFIG["ssh"]["confirm_seconds"])
+            if kind == SIGN_REQUEST and not confirm(body):
+                send_msg(client, bytes([FAILURE]))
+                continue
+            if upstream is None:
+                upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                upstream.connect(rbw_socket())
+            send_msg(upstream, body)
+            answer = recv_msg(upstream)
+            if kind == REQUEST_IDENTITIES and answer[:1] == bytes([IDENTITIES_ANSWER]):
+                remember_comments(answer)
+            send_msg(client, answer)
+    except (EOFError, ConnectionError, OSError) as e:
+        if not isinstance(e, EOFError):
+            bw.log(f"ssh: connection closed: {e}")
+            try:
+                send_msg(client, bytes([FAILURE]))
+            except OSError:
+                pass
+    finally:
+        client.close()
+        if upstream is not None:
+            upstream.close()
+
+
+def listening_socket():
+    # systemd のソケット起動なら fd 3 を受け取る
+    if os.environ.get("LISTEN_PID") == str(os.getpid()) and int(os.environ.get("LISTEN_FDS", "0")) >= 1:
+        return socket.socket(fileno=3)
+    if len(sys.argv) < 2:
+        sys.exit("usage: bw-ssh-agent <socket path>   (or start it from bw-ssh-agent.socket)")
+    path = sys.argv[1]
+    if os.path.exists(path):
+        os.unlink(path)
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    old = os.umask(0o177)
+    s.bind(path)
+    os.umask(old)
+    s.listen()
+    return s
+
+
+def main():
+    server = listening_socket()
+    while True:
+        client, _ = server.accept()
+        threading.Thread(target=serve, args=(client,), daemon=True).start()
+
+
+if __name__ == "__main__":
+    main()

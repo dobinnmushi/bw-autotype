@@ -1,0 +1,15 @@
+[Unit]
+Description=bw-ssh-agent: SSH agent that asks for your fingerprint before rbw signs
+# 他の SSH エージェント（OpenSSH・gcr・gpg）のあとに起動し、SSH_AUTH_SOCK を最後に設定する（gcr-ssh-agent.socket と同じ方式）
+After=ssh-agent.socket gcr-ssh-agent.socket gpg-agent-ssh.socket
+Before=graphical-session-pre.target
+
+[Socket]
+ListenStream=%t/bw-ssh-agent/socket
+SocketMode=0600
+DirectoryMode=0700
+ExecStartPost=/usr/bin/systemctl --user set-environment SSH_AUTH_SOCK=%t/bw-ssh-agent/socket
+ExecStopPre=/usr/bin/systemctl --user unset-environment SSH_AUTH_SOCK
+
+[Install]
+WantedBy=sockets.target

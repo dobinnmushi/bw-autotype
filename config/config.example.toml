@@ -40,6 +40,11 @@
 # The list window: "gtk" (built-in, with type and folder filters) or "rofi"
 # selector = "gtk"
 
+[ssh]
+# bw-ssh-agent (./install.sh --ssh): after one confirmation, sign without asking again for this many seconds
+# (0: ask every time). git and ssh may connect several times for one command.
+# confirm_seconds = 30
+
 [new]
 # Keyboard handling of the new-login form:
 #   "standard"  Tab moves between fields, Enter saves, Esc cancels
