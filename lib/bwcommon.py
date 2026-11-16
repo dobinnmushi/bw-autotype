@@ -56,7 +56,7 @@ DEFAULTS = {
     },
     "autotype": {
         "recent_seconds": 300,          # この秒数以内に使った項目を一覧の先頭に置く
-        "settle_seconds": 0.25,         # 元のウィンドウが前面に戻ってから打ち始めるまでの待ち
+        "settle_seconds": 0.1,          # 元のウィンドウが前面に戻ってから打ち始めるまでの待ち（一覧が閉じた直後の1回だけ）
         "clear_clipboard_seconds": 30,  # コピーしてからクリップボードを消すまでの秒数（0 なら消さない）
         "help": "full",                 # 一覧の下のキー説明: full（列に並べる）| line（1行）| none
         "selector": "gtk",              # 一覧の画面: gtk（種類・フォルダで絞れる自作の一覧）| rofi

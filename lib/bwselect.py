@@ -110,14 +110,24 @@ class Row:
         self.text = " ".join([*key, TYPE_NAMES.get(kind, "")]).lower() if key else plain(line).lower()
 
 
-def load_rows(lines, entries):
-    types = {}
+def load_types():
+    """(フォルダ, 名前, ユーザー名) → 種類。bw-autotype が BW_AUTOTYPE_ITEMS のファイルで渡していればそれを、
+    なければ rbw list を読む"""
+    try:
+        with open(os.environ["BW_AUTOTYPE_ITEMS"], encoding="utf-8") as f:
+            return {(folder, name, user): kind for folder, name, user, kind in json.load(f)}
+    except (KeyError, OSError, ValueError):
+        pass
     try:
         r = subprocess.run(["rbw", "list", "--raw"], capture_output=True, text=True)
-        for i in json.loads(r.stdout) if r.returncode == 0 else []:
-            types[(i.get("folder") or "", i.get("name") or "", i.get("user") or "")] = i.get("type")
+        return {(i.get("folder") or "", i.get("name") or "", i.get("user") or ""): i.get("type")
+                for i in (json.loads(r.stdout) if r.returncode == 0 else [])}
     except ValueError:
-        pass
+        return {}
+
+
+def load_rows(lines, entries):
+    types = load_types()
     try:
         site = {tuple(k) for k in json.loads(os.environ.get("BW_AUTOTYPE_SITE") or "[]")}
     except ValueError:

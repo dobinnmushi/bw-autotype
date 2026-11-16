@@ -90,7 +90,9 @@ rofi-rbw's own options are in `config/rofi-rbw.rc`. With `autotype.selector = "r
 - The vault stays unlocked in rbw-agent's memory until rbw's `lock_timeout`. The fingerprint only guards the
   hotkeys: any program running as you can still run `rbw get`. Lock your screen when you leave.
 - Passwords are never written to files, logs or notifications. They are passed to dotool and `rbw add` on stdin.
-- Typing waits until the original window has focus again, plus `autotype.settle_seconds`.
+- Typing waits until the original window has focus again, plus `autotype.settle_seconds` before the first field.
+  Keys go through a resident dotoold (started on demand, its pipe in `$XDG_RUNTIME_DIR/bw-autotype/`), which
+  avoids dotool's ~0.7 s start-up for every field.
 - Logs: `journalctl -t bw-autotype` (which identity check was used and whether something was saved; no secrets).
 
 ## Passkeys
@@ -124,7 +126,7 @@ bin/bw-ssh-agent             SSH agent in front of rbw's, asks before signing (i
 lib/bwcommon.py              shared code (settings, identity check, focused window, browser URL, layout/IME, last item)
 lib/bwselect.py              the list window (GTK4; answers like rofi -dmenu, adds type/folder dropdowns)
 lib/rofi                     what rofi-rbw calls as `rofi`: the list window above, or real rofi (XWayland, theme)
-lib/dotool                   dotool wrapper (types only after the window you started from has focus again)
+lib/dotool                   dotool wrapper (waits for the window you started from; sends keys to a resident dotoold)
 lib/wl-copy                  wl-copy wrapper (drops --sensitive on old wl-clipboard; clears copies after a while)
 config/config.example.toml   settings template
 config/rofi-rbw.rc           rofi-rbw settings

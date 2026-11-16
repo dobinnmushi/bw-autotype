@@ -1,29 +1,131 @@
 #!/usr/bin/python3 -I
-"""bw-autotype 専用の dotool 中継（rofi-rbw からは PATH 上の `dotool` として呼ばれる）。
+"""bw-autotype 専用の dotool 中継（rofi-rbw などからは PATH 上の `dotool` として呼ばれる）。
 
-一覧が閉じてから元の入力欄にフォーカスが戻りきる前に打ち始めると、
-先頭の何文字かが別の場所に入ることがある。そこで、ホットキーを押したときのウィンドウ
-（bw-autotype が BW_AUTOTYPE_TARGET_WIN で渡す）が前面に戻るのを待ち（最大2秒）、
-さらに少し待ってから本物の dotool（PATH 上の、この中継以外のもの）に標準入力をそのまま渡す。
-戻らなければ、別の場所に打たないよう入力をやめて知らせる。
+速さのため、dotool を毎回起動せず（仮想キーボードを作るのに毎回 0.7 秒ほどかかる）、常駐の dotoold に
+dotoolc で命令を渡す。dotoold は必要になったときに、今の配列で起動する（配列が変われば起動し直す）。
+命令の口（パイプ）は自分しか入れない $XDG_RUNTIME_DIR/bw-autotype/ に置く（既定の /tmp だと他の人も書ける恐れがある）。
+
+一覧が閉じてから元の入力欄にフォーカスが戻りきる前に打ち始めると、先頭の何文字かが別の場所に入ることがある。
+そこで、ホットキーを押したときのウィンドウ（bw-autotype が BW_AUTOTYPE_TARGET_WIN で渡す）が前面に戻るのを待つ（最大2秒）。
+戻らなければ、別の場所に打たないよう入力をやめて知らせる。落ち着くまでの待ち（autotype.settle_seconds）は、
+一覧が閉じた直後の1回目だけにし、続けて送る Tab やパスワードでは待たない。
+
+dotoolc は書き込んだらすぐ戻るので、打ち終わるまでの時間を見積もって待ってから終わる
+（呼び出し元が IME を元に戻すのが、打ち終わる前にならないように）。
+dotoold・dotoolc がなければ、従来どおり本物の dotool をその都度起動する。
 """
 import os
+import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bwcommon as bw  # noqa: E402
 
-target = os.environ.get("BW_AUTOTYPE_TARGET_WIN", "")
-if target.isdigit():
-    if not bw.wait_focus(int(target), seconds=2.0):
-        bw.notify(bw.tr("元のウィンドウに戻れなかったため、入力しませんでした",
-                        "Not typed: the original window did not get focus back"), urgent=True)
-        sys.exit(1)
-else:
+PIPE = os.path.join(bw.STATE_DIR, "dotool-pipe")
+DAEMON_STATE = os.path.join(bw.STATE_DIR, "dotoold")     # 「pid 配列」
+LAST_SEND = os.path.join(bw.STATE_DIR, "dotool-last")    # 最後に送った時刻
+CONTINUE_SECONDS = 2.0     # これ以内に送っていれば、続きの入力とみなして落ち着くまで待たない
+PER_CHAR_SECONDS = 0.012   # dotool の既定（typedelay 2ms + typehold 8ms）に少し余裕を足したもの
+
+
+def real(name):
+    return bw.which_real(name) or os.path.expanduser(f"~/.local/bin/{name}")
+
+
+def read_file(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+STARTUP_SECONDS = 0.8      # 起動したての dotoold が仮想キーボードを用意するまで（その後で打ち始める）
+
+
+def ensure_daemon(layout):
+    """今の配列の dotoold を用意する。(使えるか, 今起動したか)"""
+    state = read_file(DAEMON_STATE).split(" ", 1)
+    pid = int(state[0]) if state[0].isdigit() else 0
+    if pid and alive(pid) and len(state) == 2 and state[1] == layout and os.path.exists(PIPE):
+        return True, False
+    if pid and alive(pid):
+        os.kill(pid, 15)
+        time.sleep(0.1)
+    os.makedirs(bw.STATE_DIR, mode=0o700, exist_ok=True)
+    lay, _, variant = layout.partition(":")
+    # dotoold は PATH から dotool を探すので、この中継を除いた PATH を渡す
+    path = ":".join(p for p in os.environ.get("PATH", "").split(":") if os.path.abspath(p) != bw.LIB_DIR)
+    env = dict(os.environ, PATH=path, DOTOOL_PIPE=PIPE, DOTOOL_XKB_LAYOUT=lay)
+    env.pop("DOTOOL_XKB_VARIANT", None)
+    if variant:
+        env["DOTOOL_XKB_VARIANT"] = variant
+    proc = subprocess.Popen([real("dotoold")], env=env, start_new_session=True,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with open(DAEMON_STATE, "w", encoding="utf-8") as f:
+        f.write(f"{proc.pid} {layout}\n")
     end = time.time() + 2.0
-    while time.time() < end and bw.focused_window().get("wm_class", "").lower() in ("rofi", "local.bwautotype.list"):
-        time.sleep(0.05)
-time.sleep(bw.SETTLE_SECONDS)
-real = bw.which_real("dotool") or os.path.expanduser("~/.local/bin/dotool")
-os.execv(real, [real, *sys.argv[1:]])
+    while time.time() < end and not os.path.exists(PIPE):
+        time.sleep(0.02)
+    return os.path.exists(PIPE), True
+
+
+def typing_seconds(commands):
+    """命令を打ち終わるまでのおおよその秒数"""
+    chars = 0
+    for line in commands.splitlines():
+        word, _, rest = line.partition(" ")
+        chars += len(rest) if word == "type" else 1 if word in ("key", "keydown", "keyup") else 0
+    return chars * PER_CHAR_SECONDS + 0.03
+
+
+def main():
+    commands = sys.stdin.read()
+    if not commands.endswith("\n"):
+        commands += "\n"   # パイプでは次に送る命令とつながってしまうので、必ず改行で終える
+    now = time.time()
+    try:
+        last = float(read_file(LAST_SEND) or 0)
+    except ValueError:
+        last = 0
+    continuing = now - last < CONTINUE_SECONDS
+
+    target = os.environ.get("BW_AUTOTYPE_TARGET_WIN", "")
+    if target.isdigit():
+        if not bw.wait_focus(int(target), seconds=2.0):
+            bw.notify(bw.tr("元のウィンドウに戻れなかったため、入力しませんでした",
+                            "Not typed: the original window did not get focus back"), urgent=True)
+            sys.exit(1)
+    else:
+        end = time.time() + 2.0
+        while time.time() < end and bw.focused_window().get("wm_class", "").lower() in ("rofi", "local.bwautotype.list"):
+            time.sleep(0.05)
+    if not continuing:
+        time.sleep(bw.SETTLE_SECONDS)
+
+    layout = f"{os.environ.get('DOTOOL_XKB_LAYOUT', 'us')}:{os.environ.get('DOTOOL_XKB_VARIANT', '')}"
+    ready, started = (ensure_daemon(layout) if os.path.exists(real("dotoold")) and os.path.exists(real("dotoolc"))
+                      else (False, False))
+    if ready:
+        r = subprocess.run([real("dotoolc")], input=commands, text=True, env=dict(os.environ, DOTOOL_PIPE=PIPE))
+        if r.returncode == 0:
+            time.sleep(typing_seconds(commands) + (STARTUP_SECONDS if started else 0))
+    else:
+        r = subprocess.run([real("dotool"), *sys.argv[1:]], input=commands, text=True)
+    os.makedirs(bw.STATE_DIR, mode=0o700, exist_ok=True)
+    with open(LAST_SEND, "w", encoding="utf-8") as f:
+        f.write(f"{time.time()}\n")
+    sys.exit(r.returncode)
+
+
+if __name__ == "__main__":
+    main()

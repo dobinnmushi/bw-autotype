@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import unicodedata
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
@@ -65,6 +66,15 @@ def site_matches(win, items):
         if hits:
             return hits, w
     return [], ""
+
+
+def write_items(items):
+    """項目の (フォルダ, 名前, ユーザー名, 種類) を STATE_DIR のファイルに書き、そのパスを返す（秘密は含まない）"""
+    os.makedirs(bw.STATE_DIR, mode=0o700, exist_ok=True)
+    path = os.path.join(bw.STATE_DIR, "items.json")
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
+        json.dump([[*item_key(i), i.get("type")] for i in items], f)
+    return path
 
 
 def item_key(i):
@@ -176,17 +186,31 @@ def remember_used(before):
         bw.remember(changed[0])
 
 
+def prepare(win):
+    """一覧を出すための下ごしらえ: (保管庫の項目, 合う項目, rofi 用の語)。保管庫がロック中なら項目は空"""
+    items = vault_items()
+    matches, term = site_matches(win, items)
+    return items, matches, term
+
+
 def main():
     win = bw.focused_window()
+    # 指紋を待つあいだに、保管庫の一覧を読み、前面のページに合う項目を探しておく
+    prep = {}
+    worker = threading.Thread(target=lambda: prep.update(result=prepare(win)), daemon=True)
+    worker.start()
     if not bw.authorize():
         bw.notify(bw.tr("中止しました（本人確認ができませんでした）", "Cancelled (could not verify your identity)"))
         return 1
+    worker.join()
+    items, matches, term = prep.get("result") or ([], [], "")
+    if not items:
+        items, matches, term = prepare(win)    # ロック中だったなどで読めていなければ、開いたあとで読み直す
 
     mesg = help_message()
     extra = ["-mesg", mesg] if mesg else []
     h = bw.recent_hash()
     recent_first = bool(h and bw.put_first(h, bw.read_runcache()))
-    matches, term = site_matches(win, vault_items())
     env_extra = {"BW_AUTOTYPE_TARGET_WIN": str(win.get("id") or "")}
     if bw.CONFIG["autotype"]["selector"] == "rofi":
         # rofi: 直前の項目がなければ、合う語を絞り込み欄に入れる
@@ -195,6 +219,8 @@ def main():
     else:
         # 自作の一覧: 合う項目を上に並べて印を付ける（直前の項目はさらにその上）。キー説明は表にして出す
         env_extra["BW_AUTOTYPE_SITE"] = json.dumps([item_key(i) for i in matches])
+        # 一覧の画面が rbw list をもう一度呼ばずに済むよう、項目の種類を自分しか読めないファイルで渡す
+        env_extra["BW_AUTOTYPE_ITEMS"] = write_items(items)
         env_extra["BW_AUTOTYPE_RECENT"] = "1" if recent_first else ""
         if mesg:
             groups, last = help_rows()

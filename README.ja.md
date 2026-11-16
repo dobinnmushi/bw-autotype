@@ -97,7 +97,8 @@ rofi-rbw 自体の設定は `config/rofi-rbw.rc`。`autotype.selector = "rofi"` 
 - 保管庫は rbw の `lock_timeout` まで rbw-agent のメモリ上で開いたまま。指紋で守れるのはホットキーの入口だけで、
   ログイン中の自分の権限のプログラムは `rbw get` で読める。席を立つときは画面ロック。
 - パスワードはファイル・ログ・通知に出さない。dotool と `rbw add` には標準入力で渡す。
-- 入力は、元のウィンドウが前面に戻ったことを確かめ、さらに `autotype.settle_seconds` 待ってから行う。
+- 入力は、元のウィンドウが前面に戻ったことを確かめ、最初の欄の前だけさらに `autotype.settle_seconds` 待ってから行う。
+  キーは常駐の dotoold（必要なときに起動。命令の口は `$XDG_RUNTIME_DIR/bw-autotype/`）に送るので、欄ごとに dotool の起動（約 0.7 秒）を待たない。
 - 記録: `journalctl -t bw-autotype`（本人確認の経路と保存の有無だけ。認証情報は書かない）。
 
 ## パスキー
@@ -130,7 +131,7 @@ bin/bw-ssh-agent             rbw の SSH エージェントの前に置き、署
 lib/bwcommon.py              共通部分（設定・本人確認・前面ウィンドウ・ブラウザの URL・配列と IME・直前の項目）
 lib/bwselect.py              一覧の画面（GTK4。rofi -dmenu と同じ約束で答え、種類・フォルダのプルダウンを足す）
 lib/rofi                     rofi-rbw が `rofi` として呼ぶもの。上の一覧か、本物の rofi（XWayland・テーマ）を出す
-lib/dotool                   dotool の中継（ホットキーを押したときのウィンドウが前面に戻ってから打つ）
+lib/dotool                   dotool の中継（元のウィンドウが前面に戻るのを待ち、常駐の dotoold にキーを送る）
 lib/wl-copy                  wl-copy の中継（古い wl-clipboard では --sensitive を外す。コピーをしばらくして消す）
 config/config.example.toml   設定ファイルの見本
 config/rofi-rbw.rc           rofi-rbw の設定

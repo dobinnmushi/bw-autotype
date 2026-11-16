@@ -31,8 +31,8 @@
 # An item used within this many seconds is preselected at the top of the list
 # (username on one page, then password on the next page).
 # recent_seconds = 300
-# Wait after the original window regains focus before typing (seconds)
-# settle_seconds = 0.25
+# Wait after the original window regains focus before typing (seconds; only before the first field)
+# settle_seconds = 0.1
 # Clear the clipboard this many seconds after copying, if it still holds the copied value (0: never)
 # clear_clipboard_seconds = 30
 # Key help below the list: "full" (in columns), "line" (one line) or "none"
