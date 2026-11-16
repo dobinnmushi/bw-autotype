@@ -2,6 +2,8 @@
 # bw-autotype を使える状態にする。何度実行してもよい（既にあるものは上書きせず、そろえるだけ）。
 #   ./install.sh                 リンク・ランチャー・ショートカット・設定ファイルをそろえる
 #   ./install.sh --build-dotool  上に加えて dotool をソースからビルドして ~/.local/bin に入れる
+#   ./install.sh --chrome        上に加えて、アドレスバーを読めるようにした Chrome 系のランチャーを作る
+# オプションは並べて指定できる。
 # 事前に必要なもの（sudo が要るものを含む）は README の「導入」（Installation）を参照。
 set -eu
 R=$(cd "$(dirname "$0")" && pwd)
@@ -19,7 +21,16 @@ link() { # link <リポジトリ内のパス> <置き先>
     ln -sfn "$src" "$dst"; msg "リンク: $dst → $src" "Linked: $dst → $src"
 }
 
-if [ "${1:-}" = "--build-dotool" ]; then
+build_dotool=false chrome=false
+for a in "$@"; do
+    case $a in
+        --build-dotool) build_dotool=true;;
+        --chrome) chrome=true;;
+        *) msg "知らないオプション: $a" "Unknown option: $a"; exit 2;;
+    esac
+done
+
+if $build_dotool; then
     # Go の作業場所はすべて一時ディレクトリに置き、ホームを汚さない
     tmp=$(mktemp -d); trap 'chmod -R u+w "$tmp"; rm -rf "$tmp"' EXIT
     git clone -q https://git.sr.ht/~geb/dotool "$tmp/dotool"
@@ -51,6 +62,31 @@ for n in bw-autotype bw-new; do
     sed "s|@HOME@|$HOME|g" "$R/applications/$n.desktop.in" > "$dst"
     msg "ランチャー: $dst" "Launcher: $dst"
 done
+
+# ---- Chrome 系（--chrome）----
+# アドレスバーを AT-SPI で読むには --force-renderer-accessibility が要る。システムのランチャーを
+# ~/.local/share/applications に写して、起動の指定にそれを足す（同じ名前のものがあればそちらが使われる）。
+# 目印の X-BwAutotype 行があるものだけを作り直し・削除の対象にする。
+if $chrome; then
+    found=false
+    for src in /usr/share/applications/google-chrome.desktop /usr/share/applications/chromium.desktop \
+               /var/lib/snapd/desktop/applications/chromium_chromium.desktop \
+               /usr/share/applications/brave-browser.desktop; do
+        [ -r "$src" ] || continue
+        found=true
+        dst=$HOME/.local/share/applications/$(basename "$src")
+        if [ -e "$dst" ] && ! grep -q '^X-BwAutotype=' "$dst"; then
+            msg "そのまま: $dst（自分で置いたランチャーがあるため。起動の指定に --force-renderer-accessibility を足してください）" \
+                "Skipped: $dst (you have your own launcher; add --force-renderer-accessibility to its Exec lines)"
+            continue
+        fi
+        mkdir -p "$(dirname "$dst")"
+        sed -E -e '/^Exec=/{/--force-renderer-accessibility/!s|^(Exec=[^ ]+)|\1 --force-renderer-accessibility|}' \
+            -e '/^\[Desktop Entry\]$/a X-BwAutotype=true' "$src" > "$dst"
+        msg "ランチャー: $dst（ブラウザを終了して開き直すと効きます）" "Launcher: $dst (quit and reopen the browser to apply)"
+    done
+    $found || msg "Chrome 系のブラウザが見つかりませんでした" "No Chrome-based browser found"
+fi
 
 # ---- ショートカット（既存のカスタムショートカットは消さず、足すだけ。キーは設定ファイルの [hotkeys]）----
 python3 -I - "$HOME" "$R/lib" <<'EOF'

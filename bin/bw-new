@@ -16,7 +16,6 @@
 """
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -67,8 +66,8 @@ CSS = b"""
 
 
 def guess_name(win):
-    title = re.sub(r"\s+[—-]\s+Mozilla Firefox$", "", win.get("title", "")).strip()
-    if win.get("wm_class", "").startswith("firefox"):
+    title = bw.page_title(win)
+    if bw.browser_app(win):
         return title
     return title or win.get("wm_class", "").split(".")[-1]
 
@@ -110,7 +109,7 @@ class Form:
 
         # 各項目: dict(kind=..., row=..., widget=..., ...)
         self.fields = []
-        host = bw.firefox_host(win_info.get("title", "")) if win_info.get("wm_class", "").startswith("firefox") else None
+        host = bw.browser_host(win_info)
         host = host.removeprefix("www.") if host else None
         self.name = self._text(grid, tr("名前", "Name"), host or guess_name(win_info),
                                tr("保管庫での項目名（例: github.com）", "Item name in the vault (e.g. github.com)"))

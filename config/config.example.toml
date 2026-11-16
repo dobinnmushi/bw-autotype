@@ -33,6 +33,8 @@
 # recent_seconds = 300
 # Wait after the original window regains focus before typing (seconds)
 # settle_seconds = 0.25
+# Clear the clipboard this many seconds after copying, if it still holds the copied value (0: never)
+# clear_clipboard_seconds = 30
 
 [new]
 # Keyboard handling of the new-login form:

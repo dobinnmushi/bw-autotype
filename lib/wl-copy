@@ -1,0 +1,37 @@
+#!/usr/bin/python3 -I
+"""bw-autotype 専用の wl-copy 中継（rofi-rbw からは PATH 上の `wl-copy` として呼ばれる）。
+
+- 本物の wl-copy が --sensitive を知らない版（wl-clipboard 2.3.0 より前）なら、その指定を外して渡す。
+- コピーしたときは autotype.clear_clipboard_seconds 秒後に、まだ同じ中身ならクリップボードを消す
+  （rofi-rbw が自分で消すのはパスワードをコピーしたときだけなので）。
+"""
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bwcommon as bw  # noqa: E402
+
+real = bw.which_real("wl-copy") or "/usr/bin/wl-copy"
+args = sys.argv[1:]
+if "--sensitive" in args and "--sensitive" not in bw.run([real, "--help"]).stdout:
+    args.remove("--sensitive")
+if any(a in ("-c", "--clear", "-h", "--help", "-v", "--version") for a in args):
+    os.execv(real, [real, *args])
+
+data = sys.stdin.buffer.read()
+rc = subprocess.run([real, *args], input=data).returncode
+seconds = float(bw.CONFIG["autotype"]["clear_clipboard_seconds"])
+if rc == 0 and seconds > 0 and os.fork() == 0:
+    # 子だけが残って待つ（呼び出し元の rofi-rbw はすぐ先へ進める）
+    os.setsid()
+    devnull = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(devnull, fd)
+    time.sleep(seconds)
+    now = subprocess.run(["wl-paste", "-n"], capture_output=True).stdout
+    if now == data.rstrip(b"\n"):
+        subprocess.run([real, "--clear"])
+    os._exit(0)
+sys.exit(rc)

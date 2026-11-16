@@ -20,6 +20,10 @@ unlink_if_ours "$HOME/.local/lib/bw-autotype"
 unlink_if_ours "${XDG_CONFIG_HOME:-$HOME/.config}/rofi-rbw.rc"
 unlink_if_ours "${XDG_CONFIG_HOME:-$HOME/.config}/rofi/themes/bw-autotype.rasi"
 rm -fv "$HOME/.local/share/applications/bw-autotype.desktop" "$HOME/.local/share/applications/bw-new.desktop"
+# install.sh --chrome で作った Chrome 系のランチャー（目印の行があるものだけ）
+for f in "$HOME"/.local/share/applications/*.desktop; do
+    [ -f "$f" ] && grep -q '^X-BwAutotype=' "$f" && { rm "$f"; msg "削除: $f" "Removed: $f"; }
+done
 
 # ショートカット: 自分の2つだけをリストから外し、中身を消す（他のカスタムショートカットはそのまま）
 python3 -I - <<'PY'

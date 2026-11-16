@@ -5,9 +5,10 @@ typer = dotool
 clipboarder = wl-copy
 # Label left of the filter box
 prompt = Bitwarden
-# Keys in the list (typing only; no copy actions: Ubuntu's wl-copy lacks --sensitive, so copied
-# passwords may end up in clipboard history). bw-autotype builds the key help below the list from this line.
-keybindings = Alt+1:type:username:tab:password,Alt+2:type:username,Alt+3:type:password,Alt+4:type:totp,Alt+m::menu,Alt+s:sync
+# Keys in the list. bw-autotype builds the key help below the list from this line.
+# Passwords and card numbers are only typed, never copied: many clipboard history managers ignore the
+# "sensitive" hint and would keep them. Copies are cleared after autotype.clear_clipboard_seconds.
+keybindings = Alt+1:type:username:tab:password,Alt+2:type:username,Alt+3:type:password,Alt+4:type:totp,Alt+u:copy:username,Alt+t:copy:totp,Alt+h:copy:cardholder,Alt+m::menu,Alt+s:sync
 # Keys in the "choose what to type" menu opened by Alt+m (Enter also types)
 menu-keybindings = Alt+t:type
 # Hide rofi-rbw's own key help (bw-autotype shows its own)

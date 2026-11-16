@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..
 import bwcommon as bw  # noqa: E402
 
 # 絞り込み語の候補から外す語（ブラウザ名など、どの項目にも当たりうる語）
-STOPWORDS = {"mozilla", "firefox", "org", "com", "www", "net", "the", "and",
+STOPWORDS = {"mozilla", "firefox", "google", "chrome", "chromium", "brave", "org", "com", "www", "net", "the", "and",
              "new", "tab", "page", "gnome", "ubuntu", "snap", "app", "desktop"}
 DEFAULT_KEYBINDINGS = ("Alt+1:type:username:tab:password,Alt+2:type:username,Alt+3:type:password,"
                        "Alt+4:type:totp,Alt+c:copy:password,Alt+u:copy:username,Alt+t:copy:totp,"
@@ -36,9 +36,9 @@ def pick_filter(win):
     except ValueError:
         items = []
 
-    # Firefox なら、アドレスバーのドメインで絞る（rofi は表示中の名前に対して絞るので、名前で当たる語を選ぶ）
-    if win.get("wm_class", "").startswith("firefox"):
-        host = bw.firefox_host(win.get("title", ""))
+    # ブラウザなら、アドレスバーのドメインで絞る（rofi は表示中の名前に対して絞るので、名前で当たる語を選ぶ）
+    if bw.browser_app(win):
+        host = bw.browser_host(win)
         if host:
             dom = bw.base_domain(host)
             if any(dom in (i.get("name") or "").lower() for i in items):
@@ -49,7 +49,7 @@ def pick_filter(win):
                 return names.pop()
 
     # それ以外は、題名・アプリ名の語のうち、項目の名前・ユーザー名・フォルダに含まれるもの
-    title = re.sub(r"\s+[—-]\s+Mozilla Firefox$", "", win.get("title", ""))
+    title = bw.page_title(win)
     words = re.findall(r"\w+", f"{title} {win.get('wm_class', '').split('.')[-1]}".lower())
     entries = [" ".join(str(i.get(k) or "") for k in ("name", "user", "folder")).lower() for i in items]
     for w in words:
@@ -61,6 +61,7 @@ def pick_filter(win):
 # ---- キー説明 ----
 TARGET_NAMES = {"username": bw.tr("ユーザー名", "username"), "password": bw.tr("パスワード", "password"),
                 "totp": bw.tr("ワンタイムコード", "one-time code"), "notes": bw.tr("メモ", "notes"),
+                "cardholder": bw.tr("カード名義", "cardholder name"),
                 "tab": "Tab", "enter": "Enter", "delay": bw.tr("（待つ）", "(wait)")}
 
 
@@ -85,8 +86,9 @@ def read_keybindings():
 
 
 def help_message():
-    typing, copying, other = bw.tr("入力", "Type"), bw.tr("コピー", "Copy"), bw.tr("その他", "Other")
-    groups = {typing: [], copying: [], other: []}
+    typing, copying, cards, other = (bw.tr("入力", "Type"), bw.tr("コピー", "Copy"),
+                                     bw.tr("カード等", "Cards etc."), bw.tr("その他", "Other"))
+    groups = {typing: [], copying: [], cards: [], other: []}
     for kb in read_keybindings().split(","):
         parts = kb.strip().split(":")
         if len(parts) < 2:
@@ -102,9 +104,19 @@ def help_message():
                      else bw.tr("既定の中身", "default"))
             if action == "type" and targets == ["username", "tab", "password"]:
                 key = f"Enter / {key}"
+            if action == "copy":
+                label = " → ".join(names)
             groups[typing if action == "type" else copying].append((key, label))
     if not any(k.startswith("Enter") for k, _ in groups[typing]):
         groups[typing].insert(0, ("Enter", " → ".join(TARGET_NAMES[t] for t in ("username", "tab", "password"))))
+    secs = int(bw.CONFIG["autotype"]["clear_clipboard_seconds"])
+    if groups[copying] and secs > 0:
+        groups[copying].append(("", bw.tr(f"（コピーは{secs}秒後に消える）", f"(copies are cleared after {secs}s)")))
+    groups[cards] = [
+        ("Enter", bw.tr("カード: 番号 → Tab → 有効期限 → Tab → コード（月・年を別々に入れるときは Alt+m）",
+                        "card: number → Tab → expiry → Tab → code (Alt+m for month and year separately)")),
+        ("Enter", bw.tr("個人情報: 入れる中身を選ぶ", "identity: choose what to type")),
+    ]
     groups[other].append(("Esc", bw.tr("閉じる", "close")))
     groups[other].append((bw.hotkey_label(bw.CONFIG["hotkeys"]["new"]),
                           bw.tr("新しいパスワードを作って保存（この一覧を閉じてから）",
@@ -112,10 +124,11 @@ def help_message():
 
     groups = {k: v for k, v in groups.items() if v}
     keyw = max(width(k) for rows in groups.values() for k, _ in rows)
+    headw = max(width(h) for h in groups) + 2
     lines = []
     for head, rows in groups.items():
         for i, (k, label) in enumerate(rows):
-            h = pad(head if i == 0 else "", 8)
+            h = pad(head if i == 0 else "", headw)
             lines.append(f"<span foreground='#a0a0a0'>{html.escape(h)}</span>"
                          f"<b>{html.escape(pad(k, keyw))}</b>  {html.escape(label)}")
     return "\n".join(lines)

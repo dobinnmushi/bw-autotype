@@ -57,6 +57,7 @@ DEFAULTS = {
     "autotype": {
         "recent_seconds": 300,          # この秒数以内に使った項目を一覧の先頭に置く
         "settle_seconds": 0.25,         # 元のウィンドウが前面に戻ってから打ち始めるまでの待ち
+        "clear_clipboard_seconds": 30,  # コピーしてからクリップボードを消すまでの秒数（0 なら消さない）
     },
     "new": {
         "keys": "standard",             # standard | vim
@@ -237,14 +238,36 @@ def wait_focus(win_id, seconds=3.0):
     return False
 
 
-# ---- Firefox の表示中のページ ----
-def firefox_host(title):
-    """前面の Firefox ウィンドウ（題名が title のもの）のアドレスバーからホスト名を取る。
+# ---- ブラウザの表示中のページ ----
+# wm_class の先頭 → AT-SPI でのアプリ名
+BROWSERS = {"firefox": "Firefox", "google-chrome": "Google Chrome", "chromium": "Chromium",
+            "brave-browser": "Brave Browser"}
+BROWSER_SUFFIX = re.compile(r"\s+[—-]\s+(Mozilla Firefox|Google Chrome|Chromium|Brave)$")
 
-    アクセシビリティ（AT-SPI）で読む。GNOME の toolkit-accessibility が有効な状態で
-    Firefox が起動している必要がある。取れなければ None。ページ本文の中には入らない。
+
+def browser_app(win):
+    """前面のウィンドウがアドレスバーを読めるブラウザなら、その AT-SPI でのアプリ名。違えば None。"""
+    cls = win.get("wm_class", "").lower()
+    return next((app for prefix, app in BROWSERS.items() if cls.startswith(prefix)), None)
+
+
+def page_title(win):
+    """ウィンドウの題名から「 — Mozilla Firefox」などのブラウザ名を除いたもの。"""
+    return BROWSER_SUFFIX.sub("", win.get("title", "")).strip()
+
+
+def browser_host(win):
+    """前面のブラウザのウィンドウのアドレスバーからホスト名を取る。
+
+    アクセシビリティ（AT-SPI）で読む。Firefox は GNOME の toolkit-accessibility が有効な状態で、
+    Chrome 系は --force-renderer-accessibility を付けて起動している必要がある（install.sh --chrome）。
+    取れなければ None。ページ本文の中には入らない。
     """
     import urllib.parse
+    app_name = browser_app(win)
+    if not app_name:
+        return None
+    title = win.get("title", "")
     try:
         import gi
         gi.require_version("Atspi", "2.0")
@@ -256,7 +279,7 @@ def firefox_host(title):
         apps = [desk.get_child_at_index(i) for i in range(desk.get_child_count())]
         wins = []
         for app in apps:
-            if app and (app.get_name() or "") == "Firefox":
+            if app and (app.get_name() or "") == app_name:
                 wins += [app.get_child_at_index(w) for w in range(app.get_child_count())]
         wins = [w for w in wins if w and (w.get_name() or "") == title] or \
                [w for w in wins if w and w.get_state_set().contains(Atspi.StateType.ACTIVE)]
@@ -272,7 +295,9 @@ def firefox_host(title):
                     s = Atspi.Text.get_text(t, 0, Atspi.Text.get_character_count(t)) if t else ""
                     s = s.strip()
                     if s and " " not in s and "." in s:
-                        host = urllib.parse.urlsplit(s if "://" in s else "https://" + s).hostname
+                        # 表示上は https:// を省くことがある（途中の ?continue=https://… は先頭ではないので見ない）
+                        has_scheme = re.match(r"[a-z][a-z0-9+.-]*://", s, re.I)
+                        host = urllib.parse.urlsplit(s if has_scheme else "https://" + s).hostname
                         if host:
                             return host
                 if depth < 8:
