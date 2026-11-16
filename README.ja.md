@@ -20,6 +20,21 @@ Firefox の about:config・端末・普通のアプリなど、ブラウザ拡�
 Ubuntu 26.04（GNOME 50 / Wayland、jp 配列 + IBus Mozc）で作って試している。
 ほかの GNOME / Wayland の環境でも動くはずだが、あまり試していない。
 
+## 既存の道具との違い
+2026年の時点で、GNOME/Wayland のデスクトップで Bitwarden を使うと、ブラウザの外が手薄になる。
+
+| 道具 | GNOME/Wayland で、ブラウザの外に入力できるか | 備考 |
+|---|---|---|
+| Bitwarden のブラウザ拡張 | ×（ブラウザの中だけ） | Web ページにしか入れられない。 |
+| Bitwarden のデスクトップ版アプリ | × | 自動入力は[要望があり開発中](https://community.bitwarden.com/t/desktop-app-auto-type-windows-macos-linux/158)だが、ロードマップにあるのは Windows と macOS だけ。署名の前に確認できる [SSH エージェント](https://bitwarden.com/help/ssh-agent/)はある（Flatpak 版にはない）。 |
+| [Goldwarden](https://github.com/quexten/goldwarden) | ○（RemoteDesktop ポータル経由） | **2025年8月に開発が無期限に停止**した。作者は SSH キーの項目・SSH エージェント・メモリの保護・Linux の指紋での解除を公式のクライアントに取り込ませたが、自動入力は取り込まれていない。今後の Bitwarden の認証・暗号の変更で動かなくなる見込み（[作者のコメント](https://github.com/quexten/goldwarden/issues/331#issuecomment-3221660132)）。 |
+| [rbw](https://github.com/doy/rbw) + [rofi-rbw](https://github.com/fdw/rofi-rbw) | そのままでは × | X11 や wlroots 系（Sway、Hyprland）では動く。GNOME/Wayland では rofi・wofi・fuzzel が layer-shell を必要とし、wtype は使えず、ydotool は US 配列が前提。rbw の SSH エージェントは確認なしで署名する。 |
+
+bw-autotype は rbw と rofi-rbw の上に、足りないものを足している: 実際のキーボード配列と IME に合わせた dotool での入力
+（jp 配列と Mozc で確認）、種類・フォルダで絞れて合うサイトが先頭に来る GTK の一覧、アクセシビリティ経由のアドレスバーの読み取り、
+ホットキーごとの指紋の確認、パスワードと SSH キーの作成、署名のたびに指紋を求める SSH エージェント。
+パスキーは [bw-passkey](https://github.com/dobinnmushi/bw-passkey) を使う。
+
 ## 使い方
 
 ### Super+Alt+P — 入力（`bin/bw-autotype`）

@@ -20,6 +20,22 @@ It is mostly a combination of existing tools glued together with thin scripts.
 Developed and tested on Ubuntu 26.04 (GNOME 50 / Wayland) with a Japanese keyboard and IBus Mozc.
 Other GNOME / Wayland setups should work but are less tested; reports are welcome.
 
+## How it compares
+As of 2026, Bitwarden on a GNOME/Wayland desktop leaves a gap outside the browser:
+
+| Tool | Typing outside the browser on GNOME/Wayland | Notes |
+|---|---|---|
+| Bitwarden browser extension | – (browser only) | Fills web pages only. |
+| Bitwarden desktop app | – | Auto-type is [requested and in progress](https://community.bitwarden.com/t/desktop-app-auto-type-windows-macos-linux/158), but the roadmap mentions only Windows and macOS. It has an [SSH agent](https://bitwarden.com/help/ssh-agent/) that can ask before signing (not in the Flatpak build). |
+| [Goldwarden](https://github.com/quexten/goldwarden) | Yes (via the RemoteDesktop portal) | Its development was **paused indefinitely in August 2025**. Its author upstreamed SSH items, the SSH agent, memory protection and Linux biometric unlock into the official clients, but not auto-type; upcoming changes to Bitwarden's auth and crypto are expected to break it ([author's note](https://github.com/quexten/goldwarden/issues/331#issuecomment-3221660132)). |
+| [rbw](https://github.com/doy/rbw) + [rofi-rbw](https://github.com/fdw/rofi-rbw) | Not out of the box | Works on X11 and wlroots compositors (Sway, Hyprland). On GNOME/Wayland, rofi/wofi/fuzzel need layer-shell, wtype is unsupported and ydotool assumes a US layout. rbw's built-in SSH agent signs without asking. |
+
+bw-autotype builds on rbw and rofi-rbw and adds what is missing there: typing through dotool with your real
+keyboard layout and input method (tested with a Japanese layout and Mozc), its own GTK list with type/folder
+filters and the matching site first, the browser's address bar read via accessibility, a fingerprint check per
+hotkey, password and SSH-key creation, and an SSH agent that asks for your fingerprint before each signature.
+For passkeys see [bw-passkey](https://github.com/dobinnmushi/bw-passkey).
+
 ## Usage
 
 ### Super+Alt+P — type (`bin/bw-autotype`)
