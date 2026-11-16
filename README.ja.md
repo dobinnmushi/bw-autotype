@@ -93,9 +93,13 @@ rofi-rbw 自体の設定は `config/rofi-rbw.rc`。`autotype.selector = "rofi"` 
 - 記録: `journalctl -t bw-autotype`（本人確認の経路と保存の有無だけ。認証情報は書かない）。
 
 ## パスキー
-rbw（1.15）はパスキー（FIDO2 の認証情報）にまったく対応していないので、この道具からは見えず、使えない。
+パスキーには、姉妹品の **[bw-passkey](https://github.com/dobinnmushi/bw-passkey)** を使う。Bitwarden の保管庫にある
+パスキーでログインし、新しいパスキーもそこへ保存する仮想の FIDO2 セキュリティキーで、本人確認は指紋。
+ブラウザからは USB のセキュリティキーに見えるので、Bitwarden の拡張なしで使える。
+
+この道具自体はパスキーを扱わない（rbw 1.15 がパスキーを読まないため）。
 - パスキーを持つ項目も、普通のログイン項目として一覧に出る（パスキーは使えない）。
-- `bw-new` が作るのはパスワードの項目だけ。パスキーはブラウザ拡張で作る。
+- `bw-new` が作るのはパスワードの項目だけ。パスキーは bw-passkey かブラウザ拡張で作る。
 - この道具も rofi-rbw も `rbw edit` は呼ばない。自分で `rbw edit` を使うときは、パスキーを持つ項目に注意。
   rbw はパスキーの欄を持たない形で項目を送り直すので、パスキーが消える恐れがある（確かめてはいない）。
 
@@ -149,7 +153,7 @@ applications/*.desktop.in    ランチャーの雛形（@HOME@ を install.sh �
 - GNOME は layer-shell に対応しないので、wofi・fuzzel・Wayland 版の rofi は動かない（selector = "rofi" のときは XWayland で動かす）。
 - Mozc が「あ」のとき、Shift を含むショートカットは GNOME に届かない（そのためホットキーは Super+Alt+…）。
 - Chrome 系のブラウザは `--force-renderer-accessibility` を付けて起動したときだけアドレスバーを読める（`install.sh --chrome`）。付けなければ題名だけで絞り込む。
-- できないこと: パスキー（上を参照）、項目の編集、GNOME 以外のデスクトップ。
+- できないこと: パスキー（bw-passkey を使う）、項目の編集、GNOME 以外のデスクトップ。
 - 「直前の項目」は rofi-rbw の `~/.cache/rofi-rbw.runcache` の並び順を使う。rofi-rbw の更新で形式が変わると効かなくなりうる。
 
 ## ライセンス

@@ -85,9 +85,13 @@ rofi-rbw's own options are in `config/rofi-rbw.rc`. With `autotype.selector = "r
 - Logs: `journalctl -t bw-autotype` (which identity check was used and whether something was saved; no secrets).
 
 ## Passkeys
-rbw (1.15) does not support passkeys (FIDO2 credentials) at all, so this tool neither shows nor uses them:
+For passkeys, use the companion **[bw-passkey](https://github.com/dobinnmushi/bw-passkey)**: a virtual FIDO2
+security key that signs in with the passkeys in your Bitwarden vault and saves new ones there, verified with your
+fingerprint. Browsers see it as a USB security key, so it works without the Bitwarden extension.
+
+This tool itself does not handle passkeys (rbw 1.15 does not read them):
 - Items that have a passkey still appear in the list as ordinary logins; there is just no passkey to use.
-- `bw-new` creates password logins only. Create passkeys with the browser extension.
+- `bw-new` creates password logins only. Create passkeys with bw-passkey or the browser extension.
 - Neither this tool nor rofi-rbw ever calls `rbw edit`. Be careful with `rbw edit` yourself on items that have a
   passkey: rbw re-sends the item without its passkey data, which may remove the passkey (not verified).
 
@@ -141,7 +145,7 @@ applications/*.desktop.in    launcher templates (install.sh fills in @HOME@)
 - GNOME does not support layer-shell, so wofi, fuzzel and the Wayland build of rofi do not work; with selector = "rofi", rofi runs under XWayland.
 - With Mozc in hiragana mode, shortcuts containing Shift do not reach GNOME (hence Super+Alt+…).
 - Chrome-based browsers expose their address bar only when started with `--force-renderer-accessibility` (`install.sh --chrome`); otherwise the list is filtered by the window title only.
-- Not supported: passkeys (see above), editing items, other desktops than GNOME.
+- Not supported: passkeys (use bw-passkey), editing items, other desktops than GNOME.
 - "Last used item" relies on the order of rofi-rbw's `~/.cache/rofi-rbw.runcache`; a format change in rofi-rbw could break it.
 
 ## License
