@@ -54,6 +54,11 @@ On a sign-up page, click the password field, press the hotkey, (touch the sensor
 A password is generated, saved to the vault and typed into the field. Name and URI are prefilled from the browser's
 address bar. Typing a folder name that does not exist creates it.
 
+**SSH keys:** choose "SSH key (Ed25519)" as the type. The fields below the type change: username, URI and
+length disappear, and the key is created when you save (`ssh-keygen` in `$XDG_RUNTIME_DIR`, removed right away),
+saved to the vault as an SSH key item, and its public key is typed into the focused field (for example GitHub's
+"New SSH key" box), copied, or only saved. The private key goes only to the vault.
+
 The form works with the mouse, with standard keys (Tab / Enter / Esc), or — with `new.keys = "vim"` — modal
 Vim-like keys (J/K field, j/k option, i edit, p paste, v show, r regenerate, Enter save, q cancel).
 

@@ -66,7 +66,7 @@ DEFAULTS = {
     },
     "new": {
         "keys": "standard",             # standard | vim
-        "kind": "symbols",              # symbols | alnum | passphrase | pin
+        "kind": "symbols",              # symbols | alnum | passphrase | pin | ssh
         "password_length": 20,
         "passphrase_words": 6,
         "pin_digits": 6,

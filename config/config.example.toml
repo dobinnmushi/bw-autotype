@@ -50,7 +50,7 @@
 #   "standard"  Tab moves between fields, Enter saves, Esc cancels
 #   "vim"       modal: J/K field, j/k option, i edit, p paste, v show, r regenerate, Enter save, q cancel
 # keys = "standard"
-# Initial password type: "symbols", "alnum", "passphrase" or "pin"
+# Initial type: "symbols", "alnum", "passphrase", "pin" or "ssh" (SSH key)
 # kind = "symbols"
 # password_length = 20
 # passphrase_words = 6

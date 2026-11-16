@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 
@@ -45,12 +46,19 @@ KINDS = [
      NEW["passphrase_words"], 3, 20, tr("語", "words"), ["--diceware"]),
     ("pin", tr("数字のみ（PIN 用）", "Digits only (PIN)"), NEW["pin_digits"], 4, 32, tr("桁", "digits"),
      ["--only-numbers"]),
+    # SSH キー: 保存するときに ssh-keygen で作り、保管庫の「SSH キー」の項目にする（長さ・rbw generate は使わない）
+    ("ssh", tr("SSH キー（Ed25519）", "SSH key (Ed25519)"), 0, 0, 0, "", None),
 ]
 FINISH = [
     (tr("パスワードを入力", "Type the password"), "once"),
     (tr("パスワード → Tab → パスワード（確認欄も埋める）", "Password → Tab → password (fills the confirm field too)"),
      "twice"),
     (tr("保存だけ（入力しない）", "Save only (do not type)"), "none"),
+]
+FINISH_SSH = [
+    (tr("公開鍵を入力", "Type the public key"), "type"),
+    (tr("公開鍵をクリップボードにコピー", "Copy the public key to the clipboard"), "copy"),
+    (tr("保存だけ", "Save only"), "none"),
 ]
 
 CSS = b"""
@@ -81,7 +89,11 @@ def vault_items():
 
 
 class Form:
-    """フォーム本体。self.result に (password, how, name, user, folder, uri) が入れば保存する。"""
+    """フォーム本体。self.result に dict（kind が "password" か "ssh"、how、name、folder など）が入れば保存する。
+
+    並びは「名前・フォルダ → 種類 → 種類によって変わる欄」。種類より上はどの種類でも同じにし、
+    SSH キーかどうかで変わるもの（ユーザー名・URI・長さ・入力の仕方・下見）は種類より下に置く。
+    """
 
     def __init__(self, app, win_info, items):
         self.items = items
@@ -113,21 +125,25 @@ class Form:
         host = host.removeprefix("www.") if host else None
         self.name = self._text(grid, tr("名前", "Name"), host or guess_name(win_info),
                                tr("保管庫での項目名（例: github.com）", "Item name in the vault (e.g. github.com)"))
-        self.user = self._candidates(grid, tr("ユーザー名", "Username"), users, users[0] if users else "",
-                                     tr("（なし）", "(none)"))
         self.folder = self._candidates(grid, tr("フォルダ", "Folder"), [""] + folders, "",
                                        tr("（なし）— 新しい名前を打てば作成", "(none) — type a new name to create one"))
-        self.uri = self._text(grid, "URI", f"https://{host}" if host else "",
-                              tr("例: https://github.com（空でもよい）", "e.g. https://github.com (optional)"))
         self.kind = self._choice(grid, tr("種類", "Type"), [k[1] for k in KINDS], self._kind_changed,
                                  next((i for i, k in enumerate(KINDS) if k[0] == NEW["kind"]), 0))
+        # ここから下は種類によって変わる
+        self.user = self._candidates(grid, tr("ユーザー名", "Username"), users, users[0] if users else "",
+                                     tr("（なし）", "(none)"))
+        self.uri = self._text(grid, "URI", f"https://{host}" if host else "",
+                              tr("例: https://github.com（空でもよい）", "e.g. https://github.com (optional)"))
         self.length = self._number(grid, tr("長さ", "Length"))
+        self.finish_password = next((i for i, f in enumerate(FINISH) if f[1] == NEW["finish"]), 0)
         self.finish = self._choice(grid, tr("入力の仕方", "Then"), [f[0] for f in FINISH], None,
-                                   next((i for i, f in enumerate(FINISH) if f[1] == NEW["finish"]), 0))
+                                   self.finish_password)
+        self.ssh_mode = None
 
         # パスワードの下見（伏せ字、v で表示、r で作り直し）
         pw_row = Gtk.Box(spacing=8, margin_top=6, css_classes=["bw-row"])
-        pw_row.append(Gtk.Label(label=tr("パスワード", "Password"), width_chars=10, xalign=0))
+        self.pw_title = Gtk.Label(label=tr("パスワード", "Password"), width_chars=10, xalign=0)
+        pw_row.append(self.pw_title)
         self.pw_label = Gtk.Label(xalign=0, hexpand=True, css_classes=["bw-pw"], wrap=True, wrap_mode=2)
         pw_row.append(self.pw_label)
         self.eye = Gtk.ToggleButton(icon_name="view-reveal-symbolic",
@@ -138,6 +154,7 @@ class Form:
                            tooltip_text=tr("作り直す", "Regenerate") + (" (r)" if VIM else ""))
         again.connect("clicked", lambda *_: self._generate())
         pw_row.append(again)
+        self.again = again
         outer.append(pw_row)
 
         self.warn = Gtk.Label(xalign=0, css_classes=["bw-warn"], wrap=True)
@@ -301,7 +318,31 @@ class Form:
     def _kind_k(self):
         return KINDS[self.kind["dd"].get_selected()]
 
+    def is_ssh(self):
+        return self._kind_k()[0] == "ssh"
+
     def _kind_changed(self):
+        ssh = self.is_ssh()
+        if ssh != self.ssh_mode:
+            self.ssh_mode = ssh
+            for f in (self.user, self.uri, self.length):
+                f["row"].set_visible(not ssh)
+            dd = self.finish["dd"]
+            if ssh:
+                self.finish_password = dd.get_selected()
+            options = FINISH_SSH if ssh else FINISH
+            dd.set_model(Gtk.StringList.new([o[0] for o in options]))
+            dd.set_selected(0 if ssh else self.finish_password)
+            self.finish["n"] = len(options)
+            self.pw_title.set_label(tr("鍵", "Key") if ssh else tr("パスワード", "Password"))
+            self.eye.set_sensitive(not ssh)
+            self.again.set_sensitive(not ssh)
+            self._check_dup()
+        if ssh:
+            self.password = ""
+            self.pw_label.set_label(tr("保存するときに Ed25519 の鍵を作ります（秘密鍵は保管庫にだけ入れる）",
+                                       "An Ed25519 key is created when you save (the private key goes only to the vault)"))
+            return
         _, _, length, lo, hi, unit, _ = self._kind_k()
         sp = self.length["spin"]
         sp.set_range(lo, hi)
@@ -312,6 +353,8 @@ class Form:
             self._generate()
 
     def _generate(self):
+        if self.is_ssh():
+            return
         args = self._kind_k()[-1]
         n = self.length["spin"].get_value_as_int()
         r = bw.run(["rbw", "generate", str(n), *args])
@@ -319,6 +362,8 @@ class Form:
         self._show(self.shown)
 
     def _show(self, shown):
+        if self.is_ssh():
+            return
         self.shown = shown
         if self.eye.get_active() != shown:
             self.eye.set_active(shown)
@@ -329,6 +374,12 @@ class Form:
 
     def _check_dup(self):
         name = self.name["entry"].get_text().strip()
+        if self.ssh_mode:
+            dup = any(i.get("name") == name and i.get("type") == "SSH Key" for i in self.items)
+            self.warn.set_label(tr("注意: 同じ名前の SSH キーの項目がすでにあります（別の項目として追加されます）",
+                                   "Note: an SSH key item with the same name exists (a separate item will be added)")
+                                if dup and name else "")
+            return
         user = self.user["entry"].get_text().strip()
         dup = any(i.get("name") == name and (i.get("user") or "") == user for i in self.items)
         self.warn.set_label(tr("注意: 同じ名前・ユーザー名の項目がすでにあります（別の項目として追加されます）",
@@ -352,10 +403,8 @@ class Form:
                 return True
             return False
         f = self.fields[self.cur]
-        if name == "J":
-            self._goto(self.cur + 1, keep_mode=True); self.set_mode("normal")
-        elif name == "K":
-            self._goto(self.cur - 1, keep_mode=True); self.set_mode("normal")
+        if name in ("J", "K"):
+            self._goto(self._next_visible(1 if name == "J" else -1), keep_mode=True); self.set_mode("normal")
         elif name in ("j", "k"):
             self._step(f, 1 if name == "j" else -1)
         elif name == "i":
@@ -376,6 +425,15 @@ class Form:
         elif name in ("Tab", "ISO_Left_Tab", "Up", "Down", "Left", "Right", "space"):
             return False   # 普通の GTK のキー操作はそのまま使える
         return True
+
+    def _next_visible(self, d):
+        """今の項目から d の向きで、表示されている次の項目の番号（なければ今の番号）"""
+        i = self.cur + d
+        while 0 <= i < len(self.fields):
+            if self.fields[i]["row"].get_visible():
+                return i
+            i += d
+        return self.cur
 
     def _paste(self, f):
         """クリップボードの1行目を、今の項目のカーソル位置に入れる（Vim の p）。"""
@@ -419,13 +477,19 @@ class Form:
             self.warn.set_label(tr("名前を入れてください", "Enter a name"))
             self._goto(0)
             return
+        folder = self.folder["entry"].get_text().strip()
+        if self.is_ssh():
+            self.result = {"kind": "ssh", "how": FINISH_SSH[self.finish["dd"].get_selected()][1],
+                           "name": name, "folder": folder}
+            self.win.get_application().quit()
+            return
         if not self.password:
             self.warn.set_label(tr("パスワードを生成できていません（作り直してください）",
                                    "No password was generated (regenerate it)"))
             return
-        how = FINISH[self.finish["dd"].get_selected()][1]
-        self.result = (self.password, how, name, self.user["entry"].get_text().strip(),
-                       self.folder["entry"].get_text().strip(), self.uri["entry"].get_text().strip())
+        self.result = {"kind": "password", "how": FINISH[self.finish["dd"].get_selected()][1],
+                       "password": self.password, "name": name, "folder": folder,
+                       "user": self.user["entry"].get_text().strip(), "uri": self.uri["entry"].get_text().strip()}
         self.win.get_application().quit()
 
     def cancel(self):
@@ -457,6 +521,60 @@ def activate_own_window():
                     "org.gnome.Shell.Extensions.Windows", "Activate", "u", str(w["id"])])
 
 
+def make_ssh_key():
+    """Ed25519 の鍵を作り (秘密鍵, 公開鍵, 指紋) を返す。
+
+    ssh-keygen はファイルに書くので、ログイン中の自分しか読めないメモリ上の一時領域（$XDG_RUNTIME_DIR、tmpfs）に作り、
+    読んだらすぐ消す。形式は Bitwarden の SSH キーの項目に合わせる（OpenSSH 形式の秘密鍵、コメントなしの公開鍵、SHA256 の指紋）。
+    """
+    base = os.environ.get("XDG_RUNTIME_DIR") or None
+    with tempfile.TemporaryDirectory(dir=base) as d:
+        path = os.path.join(d, "key")
+        r = bw.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "", "-f", path])
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr.strip() or "ssh-keygen failed")
+        with open(path, encoding="utf-8") as f:
+            private = f.read()
+        with open(path + ".pub", encoding="utf-8") as f:
+            public = " ".join(f.read().split()[:2])
+        fingerprint = bw.run(["ssh-keygen", "-l", "-E", "sha256", "-f", path + ".pub"]).stdout.split()[1]
+    return private, public, fingerprint
+
+
+def save_ssh_key(win, result):
+    """SSH キーを作って保管庫に保存し、公開鍵を入力・コピーする"""
+    import bwvault
+    name, how = result["name"], result["how"]
+    try:
+        private, public, fingerprint = make_ssh_key()
+        bwvault.save_ssh_key(name, result["folder"], private, public, fingerprint)
+    except (OSError, RuntimeError, ValueError, IndexError) as e:
+        bw.notify(tr("SSH キーを保存できませんでした: ", "Could not save the SSH key: ") + str(e)[:200], urgent=True)
+        return 1
+    finally:
+        private = None
+    bw.log("new: saved an SSH key")
+    if how == "copy":
+        # 公開鍵なので、しばらくして消す中継は通さない。wl-copy は裏に残ってクリップボードを保つので、出力はつかまない
+        wl_copy = bw.which_real("wl-copy") or "wl-copy"
+        subprocess.run([wl_copy], input=public, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        bw.notify(tr(f"SSH キーを保存し、公開鍵をコピーしました: {name}\n{fingerprint}",
+                     f"Saved the SSH key and copied its public key: {name}\n{fingerprint}"))
+    elif how == "type" and win.get("id") and bw.wait_focus(win["id"]):
+        layout = bw.detect_layout()
+        with bw.plain_ime(*layout):
+            time.sleep(bw.SETTLE_SECONDS)
+            subprocess.run(["dotool"], input=f"type {public}\n", text=True, env=bw.dotool_env(*layout))
+        bw.notify(tr(f"SSH キーを保存し、公開鍵を入力しました: {name}", f"Saved the SSH key and typed its public key: {name}"))
+    elif how == "type":
+        bw.notify(tr(f"SSH キーを保存しました: {name}\n元のウィンドウに戻れなかったため、公開鍵は入力していません",
+                     f"Saved the SSH key: {name}\nThe public key was not typed because the original window did not come back"),
+                  urgent=True)
+    else:
+        bw.notify(tr(f"SSH キーを保存しました: {name}\n{fingerprint}", f"Saved the SSH key: {name}\n{fingerprint}"))
+    return 0
+
+
 def main():
     win = bw.focused_window()
     if not bw.authorize():
@@ -466,7 +584,9 @@ def main():
     result = run_form(win, vault_items())
     if not result:
         return 0
-    password, how, name, user, folder, uri = result
+    if result["kind"] == "ssh":
+        return save_ssh_key(win, result)
+    password, how, name, user, folder, uri = (result[k] for k in ("password", "how", "name", "user", "folder", "uri"))
 
     cmd = ["rbw", "add", name] + ([user] if user else [])
     if uri:
