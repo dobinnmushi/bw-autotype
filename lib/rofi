@@ -1,0 +1,31 @@
+#!/usr/bin/python3 -I
+"""bw-autotype 専用の rofi 中継（rofi-rbw からは PATH 上の `rofi` として呼ばれる）。
+
+- GNOME は layer-shell に対応しないため、rofi を XWayland の普通のウィンドウ（-normal-window）で開く。
+  WAYLAND_DISPLAY を外すのは rofi だけ（wl-copy などは Wayland のまま）。
+- 見た目は ~/.config/rofi/themes/bw-autotype.rasi。-dpi 1 で GNOME が XWayland に渡す Xft.dpi に合わせる。
+  入力欄の placeholder は表示の言語に合わせてここで渡す。
+- bw-autotype が環境変数 BW_AUTOTYPE_ROFI_EXTRA（JSON の配列）で渡す引数（絞り込み語・キー説明）は、
+  最初の項目一覧（rofi-rbw が -format を付けて呼ぶもの）にだけ付け、Alt+m の「中身を選ぶ」メニューには付けない。
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bwcommon as bw  # noqa: E402
+
+args = sys.argv[1:]
+try:
+    extra = json.loads(os.environ.get("BW_AUTOTYPE_ROFI_EXTRA", "[]"))
+except ValueError:
+    extra = []
+if "-format" in args:
+    args += [str(a) for a in extra]
+
+env = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "BW_AUTOTYPE_ROFI_EXTRA")}
+theme = os.path.expanduser("~/.config/rofi/themes/bw-autotype.rasi")
+placeholder = bw.tr("名前・ユーザー名で絞り込み", "Filter by name or username")
+os.execve(bw.which_real("rofi") or "/usr/bin/rofi",
+          ["rofi", "-normal-window", "-dpi", "1", "-theme", theme,
+           "-theme-str", f'entry {{ placeholder: "{placeholder}"; }}', *args], env)

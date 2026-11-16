@@ -1,0 +1,511 @@
+#!/usr/bin/python3 -I
+"""bw-new: パスワードを生成して Bitwarden に新しい項目として保存し、前面の欄に入力する（既定のホットキー Super+Alt+N）。
+
+本人確認（指紋 → だめならマスターパスワード）のあと、全項目を1枚に並べたフォームを出す。
+マウスでもすべて操作できる。キー操作は設定 new.keys で選ぶ:
+  standard（既定） Tab で項目を移動、Enter で保存して実行、Esc でやめる
+  vim             Vim ふうのモード切り替え
+    ノーマルモード  J/K: 項目を移動  j/k: 選択肢・候補を切替（長さは k で +1、j で −1）
+                    i: 文字入力  p: クリップボードの1行目をカーソル位置に貼り付け
+                    v: パスワードの表示切替  r: 作り直し  Enter: 保存して入力  q: やめる
+    入力モード      普通に文字を打てる。Esc か Enter でノーマルモードへ戻る
+生成は `rbw generate`（名前なし＝保存しない）で行い、保存は `rbw add` に標準入力で渡す（一時ファイルを作らない）。
+存在しないフォルダ名を入れると rbw が新しく作る。
+保存した項目は bw-autotype の一覧で「直前の項目」として先頭に出る。
+共通部分は lib/bwcommon.py、設定は ~/.config/bw-autotype/config.toml。
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from collections import Counter
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import bwcommon as bw  # noqa: E402
+
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
+
+tr = bw.tr
+NEW = bw.CONFIG["new"]
+VIM = NEW["keys"] == "vim"
+TITLE = tr("Bitwarden 新規登録", "Bitwarden New Login")
+
+# パスワードの種類: (設定での名前, 表示, 既定の長さ, 最小, 最大, 単位, rbw generate の追加引数)
+KINDS = [
+    ("symbols", tr("英数字＋記号", "Letters, digits and symbols"), NEW["password_length"], 4, 128,
+     tr("文字", "chars"), []),
+    ("alnum", tr("英数字のみ（記号を使えないサイト用）", "Letters and digits only (for sites that reject symbols)"),
+     NEW["password_length"], 4, 128, tr("文字", "chars"), ["--no-symbols"]),
+    ("passphrase", tr("パスフレーズ（英単語をつなげる）", "Passphrase (random English words)"),
+     NEW["passphrase_words"], 3, 20, tr("語", "words"), ["--diceware"]),
+    ("pin", tr("数字のみ（PIN 用）", "Digits only (PIN)"), NEW["pin_digits"], 4, 32, tr("桁", "digits"),
+     ["--only-numbers"]),
+]
+FINISH = [
+    (tr("パスワードを入力", "Type the password"), "once"),
+    (tr("パスワード → Tab → パスワード（確認欄も埋める）", "Password → Tab → password (fills the confirm field too)"),
+     "twice"),
+    (tr("保存だけ（入力しない）", "Save only (do not type)"), "none"),
+]
+
+CSS = b"""
+.bw-row { padding: 6px 10px; border-radius: 8px; }
+.bw-current { background: alpha(@accent_bg_color, 0.22); }
+.bw-mode { font-family: monospace; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
+.bw-normal { background: alpha(@accent_bg_color, 0.35); }
+.bw-insert { background: alpha(@success_bg_color, 0.45); }
+.bw-hint { font-size: 0.9em; opacity: 0.75; }
+.bw-pw { font-family: monospace; font-size: 1.1em; }
+.bw-warn { color: @warning_color; }
+"""
+
+
+def guess_name(win):
+    title = re.sub(r"\s+[—-]\s+Mozilla Firefox$", "", win.get("title", "")).strip()
+    if win.get("wm_class", "").startswith("firefox"):
+        return title
+    return title or win.get("wm_class", "").split(".")[-1]
+
+
+def vault_items():
+    r = bw.run(["rbw", "list", "--raw"])
+    try:
+        return json.loads(r.stdout) if r.returncode == 0 else []
+    except ValueError:
+        return []
+
+
+class Form:
+    """フォーム本体。self.result に (password, how, name, user, folder, uri) が入れば保存する。"""
+
+    def __init__(self, app, win_info, items):
+        self.items = items
+        self.result = None
+        self.mode = "normal"
+        self.cur = 0
+        self.password = ""
+        self.shown = False
+
+        users = [u for u, _ in Counter(i.get("user") for i in items if i.get("user")).most_common()]
+        folders = sorted({i.get("folder") for i in items if i.get("folder")})
+
+        self.win = Gtk.ApplicationWindow(application=app, title=TITLE)
+        self.win.set_default_size(640, -1)
+        css = Gtk.CssProvider()
+        css.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
+                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                        margin_top=14, margin_bottom=14, margin_start=14, margin_end=14)
+        self.win.set_child(outer)
+        grid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        outer.append(grid)
+
+        # 各項目: dict(kind=..., row=..., widget=..., ...)
+        self.fields = []
+        host = bw.firefox_host(win_info.get("title", "")) if win_info.get("wm_class", "").startswith("firefox") else None
+        host = host.removeprefix("www.") if host else None
+        self.name = self._text(grid, tr("名前", "Name"), host or guess_name(win_info),
+                               tr("保管庫での項目名（例: github.com）", "Item name in the vault (e.g. github.com)"))
+        self.user = self._candidates(grid, tr("ユーザー名", "Username"), users, users[0] if users else "",
+                                     tr("（なし）", "(none)"))
+        self.folder = self._candidates(grid, tr("フォルダ", "Folder"), [""] + folders, "",
+                                       tr("（なし）— 新しい名前を打てば作成", "(none) — type a new name to create one"))
+        self.uri = self._text(grid, "URI", f"https://{host}" if host else "",
+                              tr("例: https://github.com（空でもよい）", "e.g. https://github.com (optional)"))
+        self.kind = self._choice(grid, tr("種類", "Type"), [k[1] for k in KINDS], self._kind_changed,
+                                 next((i for i, k in enumerate(KINDS) if k[0] == NEW["kind"]), 0))
+        self.length = self._number(grid, tr("長さ", "Length"))
+        self.finish = self._choice(grid, tr("入力の仕方", "Then"), [f[0] for f in FINISH], None,
+                                   next((i for i, f in enumerate(FINISH) if f[1] == NEW["finish"]), 0))
+
+        # パスワードの下見（伏せ字、v で表示、r で作り直し）
+        pw_row = Gtk.Box(spacing=8, margin_top=6, css_classes=["bw-row"])
+        pw_row.append(Gtk.Label(label=tr("パスワード", "Password"), width_chars=10, xalign=0))
+        self.pw_label = Gtk.Label(xalign=0, hexpand=True, css_classes=["bw-pw"], wrap=True, wrap_mode=2)
+        pw_row.append(self.pw_label)
+        self.eye = Gtk.ToggleButton(icon_name="view-reveal-symbolic",
+                                    tooltip_text=tr("表示切替", "Show / hide") + (" (v)" if VIM else ""))
+        self.eye.connect("toggled", lambda b: self._show(b.get_active()))
+        pw_row.append(self.eye)
+        again = Gtk.Button(icon_name="view-refresh-symbolic",
+                           tooltip_text=tr("作り直す", "Regenerate") + (" (r)" if VIM else ""))
+        again.connect("clicked", lambda *_: self._generate())
+        pw_row.append(again)
+        outer.append(pw_row)
+
+        self.warn = Gtk.Label(xalign=0, css_classes=["bw-warn"], wrap=True)
+        outer.append(self.warn)
+
+        # 下の帯: モード表示・キーの説明・ボタン
+        status = Gtk.Box(spacing=8, margin_top=6)
+        self.mode_label = Gtk.Label(css_classes=["bw-mode"], visible=VIM)
+        status.append(self.mode_label)
+        self.hint = Gtk.Label(xalign=0, hexpand=True, wrap=True, css_classes=["bw-hint"])
+        status.append(self.hint)
+        outer.append(status)
+        bar = Gtk.Box(spacing=8, halign=Gtk.Align.END)
+        cancel = Gtk.Button(label=tr("やめる", "Cancel") + (" (q)" if VIM else " (Esc)"))
+        cancel.connect("clicked", lambda *_: self.cancel())
+        bar.append(cancel)
+        ok = Gtk.Button(label=tr("保存して実行", "Save") + " (Enter)", css_classes=["suggested-action"])
+        ok.connect("clicked", lambda *_: self.submit())
+        bar.append(ok)
+        outer.append(bar)
+
+        key = Gtk.EventControllerKey()
+        if VIM:
+            # 入力欄より先にキーを受け取る（ノーマルモードの j/k などを文字として入れないため）
+            key.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            key.connect("key-pressed", self.on_key)
+        else:
+            # 入力欄・選択肢が使わなかったキーだけを受け取る（IME の変換中の Esc などは入力欄が先に使う）
+            key.connect("key-pressed", self.on_key_standard)
+            self.win.set_default_widget(ok)
+        self.win.add_controller(key)
+        self.win.connect("close-request", lambda *_: (self.cancel(), True)[1])
+
+        self.name["entry"].connect("changed", lambda *_: self._check_dup())
+        self.user["entry"].connect("changed", lambda *_: self._check_dup())
+        self._kind_changed()
+        self._check_dup()
+        if VIM:
+            self.set_mode("normal")
+        else:
+            self.hint.set_label(tr("Tab で項目を移動  Enter 保存して実行  Esc やめる",
+                                   "Tab: next field  Enter: save  Esc: cancel"))
+            # 全選択にしない（IME が「あ」のとき、選ばれた文字が消されることがあるため）
+            self.name["entry"].grab_focus_without_selecting()
+        self.win.present()
+
+    # ---- 項目の部品 ----
+    def _row(self, parent, label):
+        row = Gtk.Box(spacing=8, css_classes=["bw-row"], focusable=True)
+        row.append(Gtk.Label(label=label, width_chars=10, xalign=0))
+        parent.append(row)
+        return row
+
+    def _register(self, field):
+        idx = len(self.fields)
+        self.fields.append(field)
+        if VIM:
+            click = Gtk.GestureClick()
+            click.connect("pressed", lambda *_: self._goto(idx, keep_mode=True))
+            field["row"].add_controller(click)
+        return field
+
+    def _entry_field(self, row, text, placeholder):
+        e = Gtk.Entry(text=text, placeholder_text=placeholder, hexpand=True, activates_default=not VIM)
+        if VIM:
+            focus = Gtk.EventControllerFocus()
+            focus.connect("enter", lambda *_: self._entry_focused(e))
+            e.add_controller(focus)
+        row.append(e)
+        return e
+
+    def _text(self, parent, label, text, placeholder):
+        row = self._row(parent, label)
+        e = self._entry_field(row, text, placeholder)
+        return self._register({"kind": "text", "row": row, "entry": e, "focus": e})
+
+    def _candidates(self, parent, label, options, text, placeholder):
+        row = self._row(parent, label)
+        e = self._entry_field(row, text, placeholder)
+        menu = Gtk.MenuButton(icon_name="pan-down-symbolic",
+                              tooltip_text=tr("候補", "Suggestions") + (" (j/k)" if VIM else ""))
+        box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        pop = Gtk.Popover(child=Gtk.ScrolledWindow(child=box, min_content_height=200,
+                                                   propagate_natural_height=True,
+                                                   max_content_height=400))
+        for o in options:
+            b = Gtk.Button(label=o or tr("（なし）", "(none)"), has_frame=False)
+            b.connect("clicked", lambda _b, o=o: (e.set_text(o), pop.popdown()))
+            box.append(b)
+        menu.set_popover(pop)
+        row.append(menu)
+        return self._register({"kind": "cand", "row": row, "entry": e, "options": options, "focus": e})
+
+    def _choice(self, parent, label, options, on_change, selected=0):
+        row = self._row(parent, label)
+        dd = Gtk.DropDown.new_from_strings(options)
+        dd.set_hexpand(True)
+        dd.set_selected(selected)
+        if on_change:
+            dd.connect("notify::selected", lambda *_: on_change())
+        row.append(dd)
+        return self._register({"kind": "choice", "row": row, "dd": dd, "n": len(options), "focus": None})
+
+    def _number(self, parent, label):
+        row = self._row(parent, label)
+        sp = Gtk.SpinButton.new_with_range(1, 128, 1)
+        sp.connect("value-changed", lambda *_: self._generate())
+        if VIM:
+            focus = Gtk.EventControllerFocus()
+            focus.connect("enter", lambda *_: self._entry_focused(sp))
+            sp.add_controller(focus)
+        else:
+            sp.set_activates_default(True)
+        row.append(sp)
+        unit = Gtk.Label(xalign=0, hexpand=True)
+        row.append(unit)
+        return self._register({"kind": "number", "row": row, "spin": sp, "unit": unit, "focus": sp})
+
+    # ---- 状態 ----
+    def _goto(self, idx, keep_mode=False):
+        self.cur = max(0, min(idx, len(self.fields) - 1))
+        for i, f in enumerate(self.fields):
+            (f["row"].add_css_class if i == self.cur else f["row"].remove_css_class)("bw-current")
+        if not keep_mode:
+            self.set_mode("normal")
+
+    def _entry_focused(self, widget):
+        # マウスで入力欄をクリックしたときなど: その項目の入力モードにする
+        for i, f in enumerate(self.fields):
+            if f.get("focus") is widget:
+                if self.mode != "insert" or self.cur != i:
+                    self.cur = i
+                    self._goto(i, keep_mode=True)
+                    self.set_mode("insert", grab=False)
+                return
+
+    def set_mode(self, mode, grab=True):
+        self.mode = mode
+        f = self.fields[self.cur]
+        if mode == "insert" and f.get("focus"):
+            if grab:
+                f["focus"].grab_focus()
+            self.mode_label.set_label("-- INSERT --")
+            self.mode_label.remove_css_class("bw-normal")
+            self.mode_label.add_css_class("bw-insert")
+            self.hint.set_label(tr("文字を入力中。Esc か Enter でノーマルモードへ",
+                                   "Typing. Esc or Enter returns to normal mode"))
+        else:
+            self.mode = "normal"
+            # 文字入力欄ではない行そのものにフォーカスを置く（Mozc が j/k を取り込まないように）
+            f["row"].grab_focus()
+            self.mode_label.set_label("-- NORMAL --")
+            self.mode_label.remove_css_class("bw-insert")
+            self.mode_label.add_css_class("bw-normal")
+            self.hint.set_label(tr("J/K 項目  j/k 選択肢（長さは k:+1 j:−1）  i 入力  p 貼り付け  "
+                                   "v 表示  r 作り直し  Enter 保存して実行  q やめる",
+                                   "J/K field  j/k option (length k:+1 j:−1)  i edit  p paste  "
+                                   "v show  r regenerate  Enter save  q cancel"))
+        self._goto(self.cur, keep_mode=True)
+
+    def _kind_k(self):
+        return KINDS[self.kind["dd"].get_selected()]
+
+    def _kind_changed(self):
+        _, _, length, lo, hi, unit, _ = self._kind_k()
+        sp = self.length["spin"]
+        sp.set_range(lo, hi)
+        self.length["unit"].set_label(unit)
+        if sp.get_value_as_int() != length:
+            sp.set_value(length)   # value-changed で作り直す
+        else:
+            self._generate()
+
+    def _generate(self):
+        args = self._kind_k()[-1]
+        n = self.length["spin"].get_value_as_int()
+        r = bw.run(["rbw", "generate", str(n), *args])
+        self.password = r.stdout.rstrip("\n") if r.returncode == 0 else ""
+        self._show(self.shown)
+
+    def _show(self, shown):
+        self.shown = shown
+        if self.eye.get_active() != shown:
+            self.eye.set_active(shown)
+        if not self.password:
+            self.pw_label.set_label(tr("（生成できませんでした）", "(could not generate)"))
+        else:
+            self.pw_label.set_label(self.password if shown else "●" * min(len(self.password), 40))
+
+    def _check_dup(self):
+        name = self.name["entry"].get_text().strip()
+        user = self.user["entry"].get_text().strip()
+        dup = any(i.get("name") == name and (i.get("user") or "") == user for i in self.items)
+        self.warn.set_label(tr("注意: 同じ名前・ユーザー名の項目がすでにあります（別の項目として追加されます）",
+                               "Note: an item with the same name and username exists (a separate item will be added)")
+                            if dup and name else "")
+
+    # ---- キー操作 ----
+    def on_key_standard(self, _ctrl, keyval, _code, _state):
+        if Gdk.keyval_name(keyval) == "Escape":
+            self.cancel()
+            return True
+        return False
+
+    def on_key(self, _ctrl, keyval, _code, state):
+        name = Gdk.keyval_name(keyval) or ""
+        if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK):
+            return False
+        if self.mode == "insert":
+            if name in ("Escape", "Return", "KP_Enter"):
+                self.set_mode("normal")
+                return True
+            return False
+        f = self.fields[self.cur]
+        if name == "J":
+            self._goto(self.cur + 1, keep_mode=True); self.set_mode("normal")
+        elif name == "K":
+            self._goto(self.cur - 1, keep_mode=True); self.set_mode("normal")
+        elif name in ("j", "k"):
+            self._step(f, 1 if name == "j" else -1)
+        elif name == "i":
+            if f.get("focus"):
+                self.set_mode("insert")
+            elif f["kind"] == "choice":
+                f["dd"].activate()   # 選択肢の一覧を開く
+        elif name == "p":
+            self._paste(f)
+        elif name == "v":
+            self._show(not self.shown)
+        elif name == "r":
+            self._generate()
+        elif name in ("Return", "KP_Enter"):
+            self.submit()
+        elif name == "q":
+            self.cancel()
+        elif name in ("Tab", "ISO_Left_Tab", "Up", "Down", "Left", "Right", "space"):
+            return False   # 普通の GTK のキー操作はそのまま使える
+        return True
+
+    def _paste(self, f):
+        """クリップボードの1行目を、今の項目のカーソル位置に入れる（Vim の p）。"""
+        target = f.get("entry") or f.get("spin")
+        if target is None:
+            return
+
+        def done(clip, res):
+            try:
+                text = clip.read_text_finish(res) or ""
+            except GLib.Error:
+                return
+            text = text.strip().splitlines()[0].strip() if text.strip() else ""
+            if not text:
+                return
+            if f["kind"] == "number":
+                if text.isdigit():
+                    f["spin"].set_value(int(text))
+                return
+            pos = target.get_position()
+            target.insert_text(text, pos)
+            target.set_position(pos + len(text))
+
+        Gdk.Display.get_default().get_clipboard().read_text_async(None, done)
+
+    def _step(self, f, d):
+        if f["kind"] == "choice":
+            f["dd"].set_selected((f["dd"].get_selected() + d) % f["n"])
+        elif f["kind"] == "number":
+            f["spin"].set_value(f["spin"].get_value_as_int() - d)   # k(上)=+1, j(下)=−1
+        elif f["kind"] == "cand" and f["options"]:
+            opts = f["options"]
+            cur = f["entry"].get_text()
+            i = opts.index(cur) if cur in opts else (-1 if d > 0 else 0)
+            f["entry"].set_text(opts[(i + d) % len(opts)])
+
+    # ---- 終了 ----
+    def submit(self):
+        name = self.name["entry"].get_text().strip()
+        if not name:
+            self.warn.set_label(tr("名前を入れてください", "Enter a name"))
+            self._goto(0)
+            return
+        if not self.password:
+            self.warn.set_label(tr("パスワードを生成できていません（作り直してください）",
+                                   "No password was generated (regenerate it)"))
+            return
+        how = FINISH[self.finish["dd"].get_selected()][1]
+        self.result = (self.password, how, name, self.user["entry"].get_text().strip(),
+                       self.folder["entry"].get_text().strip(), self.uri["entry"].get_text().strip())
+        self.win.get_application().quit()
+
+    def cancel(self):
+        self.result = None
+        self.win.get_application().quit()
+
+
+def run_form(win_info, items):
+    app = Adw.Application(application_id="local.bwnew.form")
+    holder = {}
+
+    def activate(a):
+        holder["form"] = Form(a, win_info, items)
+        # ショートカットから起動したとき前面に来ないことがあるので、念のため Window Calls で前面にする
+        GLib.timeout_add(300, lambda: (activate_own_window(), False)[1])
+
+    app.connect("activate", activate)
+    app.run([])
+    form = holder.get("form")
+    if form:
+        form.win.destroy()
+    return form.result if form else None
+
+
+def activate_own_window():
+    for w in bw.windows():
+        if w.get("title") == TITLE and not w.get("focus"):
+            bw.run(["busctl", "--user", "call", "org.gnome.Shell", "/org/gnome/Shell/Extensions/Windows",
+                    "org.gnome.Shell.Extensions.Windows", "Activate", "u", str(w["id"])])
+
+
+def main():
+    win = bw.focused_window()
+    if not bw.authorize():
+        bw.notify(tr("中止しました（本人確認ができませんでした）", "Cancelled (could not verify your identity)"))
+        return 1
+
+    result = run_form(win, vault_items())
+    if not result:
+        return 0
+    password, how, name, user, folder, uri = result
+
+    cmd = ["rbw", "add", name] + ([user] if user else [])
+    if uri:
+        cmd += ["--uri", uri]
+    if folder:
+        cmd += ["--folder", folder]
+    r = bw.run(cmd, input=password + "\n")     # 標準入力で渡す（1行目がパスワード）
+    if r.returncode != 0:
+        bw.notify(tr("保存に失敗しました: ", "Could not save: ") + r.stderr.strip()[:200], urgent=True)
+        return 1
+    bw.log(f"new: saved (name length {len(name)})")
+
+    # Super+Alt+P の一覧で、この項目を「直前の項目」として先頭に出す
+    h = bw.entry_hash(name, folder, user)
+    rows = [row for row in bw.read_runcache() if row[1] != h]
+    bw.write_runcache([(f"1 {h}\n", h, 1), *rows])
+    bw.remember(h)
+
+    if how == "none":
+        bw.notify(tr("保存しました: ", "Saved: ") + name)
+        return 0
+    # 元のウィンドウに戻ったことを確かめてから入力する（別の場所に打たないため）
+    if not (win.get("id") and bw.wait_focus(win["id"])):
+        key = bw.hotkey_label(bw.CONFIG["hotkeys"]["autotype"])
+        bw.notify(tr(f"保存しました: {name}\n元のウィンドウに戻れなかったため入力していません。"
+                     f"{key} → Alt+3 で入力できます",
+                     f"Saved: {name}\nNot typed because the original window did not come back. "
+                     f"Use {key} → Alt+3 to type it"), urgent=True)
+        return 0
+    layout = bw.detect_layout()
+    with bw.plain_ime(*layout):
+        time.sleep(bw.SETTLE_SECONDS)              # 入力欄へのフォーカスが落ち着くまで待つ
+        seq = f"type {password}\n" + (f"key tab\ntype {password}\n" if how == "twice" else "")
+        subprocess.run(["dotool"], input=seq, text=True, env=bw.dotool_env(*layout))
+    del password, seq
+    bw.notify(tr("保存して入力しました: ", "Saved and typed: ") + name)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Bitwarden Autotype
+Name[ja]=Bitwarden 自動入力
+Comment=Pick an item from the rbw vault and type its username and password into the previous window
+Comment[ja]=rbw の一覧から選んで、直前のウィンドウへユーザー名・パスワードを入力
+Exec=@HOME@/.local/bin/bw-autotype
+Icon=dialog-password
+Terminal=false
+Categories=Utility;Security;
+Keywords=autotype;password;rbw;bitwarden;

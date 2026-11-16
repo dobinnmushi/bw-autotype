@@ -1,0 +1,3 @@
+#!/bin/sh
+# rbw 用: 画面を暗転させない（他のウィンドウからコピーできる）普通のダイアログで pinentry-gnome3 を出す
+exec /usr/bin/pinentry-gnome3 --no-global-grab "$@"

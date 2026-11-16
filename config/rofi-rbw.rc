@@ -1,0 +1,14 @@
+# rofi-rbw settings (option names are rofi-rbw's long options without the leading --)
+# GNOME/Wayland: rofi shows the list, dotool types (bw-autotype passes the layout via DOTOOL_XKB_LAYOUT)
+selector = rofi
+typer = dotool
+clipboarder = wl-copy
+# Label left of the filter box
+prompt = Bitwarden
+# Keys in the list (typing only; no copy actions: Ubuntu's wl-copy lacks --sensitive, so copied
+# passwords may end up in clipboard history). bw-autotype builds the key help below the list from this line.
+keybindings = Alt+1:type:username:tab:password,Alt+2:type:username,Alt+3:type:password,Alt+4:type:totp,Alt+m::menu,Alt+s:sync
+# Keys in the "choose what to type" menu opened by Alt+m (Enter also types)
+menu-keybindings = Alt+t:type
+# Hide rofi-rbw's own key help (bw-autotype shows its own)
+no-help = true

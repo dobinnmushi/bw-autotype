@@ -1,0 +1,74 @@
+/* bw-autotype（Bitwarden 自動入力）専用の rofi テーマ。GNOME の暗い配色に合わせる。
+ * 大きさは mm / em 指定（中継スクリプトが -dpi 1 で起動し、GNOME の拡大率 Xft.dpi に合わせて換算される）。
+ * 行は空白で列をそろえているため、等幅フォントを使う。 */
+* {
+    bg:        #242424;
+    bg-alt:    #2e2e2e;
+    bg-input:  #1e1e1e;
+    fg:        #f0f0f0;
+    fg-dim:    #a0a0a0;
+    accent:    #3584e4;
+    on-accent: #ffffff;
+
+    font:             "Noto Sans Mono CJK JP 11";
+    background-color: transparent;
+    text-color:       @fg;
+}
+
+window {
+    width:            46em;
+    location:         center;
+    background-color: @bg;
+    border:           1px;
+    border-color:     #444444;
+    border-radius:    3mm;
+    padding:          4mm;
+}
+
+mainbox {
+    spacing:  3mm;
+    children: [ inputbar, listview, message ];
+}
+
+inputbar {
+    background-color: @bg-input;
+    border-radius:    2mm;
+    padding:          2mm 3mm;
+    spacing:          2mm;
+    children:         [ prompt, entry, num-filtered-rows ];
+}
+prompt            { text-color: @accent; }
+entry             { placeholder-color: @fg-dim; cursor: text; }
+num-filtered-rows { text-color: @fg-dim; }
+
+listview {
+    lines:        12;
+    fixed-height: false;
+    scrollbar:    true;
+    spacing:      0.5mm;
+}
+scrollbar {
+    handle-width:     1.2mm;
+    handle-color:     #5e5e5e;
+    background-color: transparent;
+}
+
+element {
+    padding:       1.5mm 3mm;
+    border-radius: 1.5mm;
+}
+element normal.normal, element alternate.normal { background-color: transparent; text-color: @fg; }
+element alternate.normal                       { background-color: @bg-alt; }
+element selected.normal                        { background-color: @accent; text-color: @on-accent; }
+element-text { highlight: bold underline; vertical-align: 0.5; }
+
+/* rofi-rbw が出す操作キーの説明（Alt+1 など） */
+message {
+    border:       1px 0 0 0;
+    border-color: #444444;
+    padding:      2mm 0 0 0;
+}
+textbox {
+    font:       "Noto Sans Mono CJK JP 9.5";
+    text-color: @fg-dim;
+}

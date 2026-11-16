@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Bitwarden New Login
+Name[ja]=Bitwarden 新規登録
+Comment=Generate a password, save it to Bitwarden and type it into the previous window
+Comment[ja]=パスワードを生成して Bitwarden に保存し、直前のウィンドウへ入力
+Exec=@HOME@/.local/bin/bw-new
+Icon=dialog-password
+Terminal=false
+Categories=Utility;Security;
+Keywords=generate;password;new;rbw;bitwarden;

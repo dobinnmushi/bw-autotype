@@ -1,0 +1,156 @@
+#!/usr/bin/python3 -I
+"""bw-autotype: GNOME/Wayland で rofi-rbw を呼び出すための薄いラッパー（既定のホットキー Super+Alt+P）。
+
+1. 本人確認（解除済みなら指紋、だめならマスターパスワード。ロック中ならマスターパスワード）。
+2. 数分以内に使った項目があれば一覧の先頭に置く（ユーザー名 → 次のページでパスワード、を楽にする）。
+   なければ、前面ウィンドウのアプリ名・タイトルから絞り込み語を作る。
+3. 一覧の下に、rofi-rbw.rc の keybindings から作ったキー説明（日本語か英語）を出す。
+4. 入力の間だけ IBus を素の配列にし、dotool に配列（DOTOOL_XKB_LAYOUT）を渡す。
+設定は ~/.config/bw-autotype/config.toml（書式は config/config.example.toml）。
+引数はそのまま rofi-rbw に渡す。共通部分は ~/.local/lib/bw-autotype/bwcommon.py。
+"""
+import html
+import json
+import os
+import re
+import subprocess
+import sys
+import unicodedata
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import bwcommon as bw  # noqa: E402
+
+# 絞り込み語の候補から外す語（ブラウザ名など、どの項目にも当たりうる語）
+STOPWORDS = {"mozilla", "firefox", "org", "com", "www", "net", "the", "and",
+             "new", "tab", "page", "gnome", "ubuntu", "snap", "app", "desktop"}
+DEFAULT_KEYBINDINGS = ("Alt+1:type:username:tab:password,Alt+2:type:username,Alt+3:type:password,"
+                       "Alt+4:type:totp,Alt+c:copy:password,Alt+u:copy:username,Alt+t:copy:totp,"
+                       "Alt+m::menu,Alt+s:sync")
+
+
+# ---- 前面ウィンドウによる絞り込み ----
+def pick_filter(win):
+    r = bw.run(["rbw", "list", "--raw"])
+    try:
+        items = json.loads(r.stdout) if r.returncode == 0 else []
+    except ValueError:
+        items = []
+
+    # Firefox なら、アドレスバーのドメインで絞る（rofi は表示中の名前に対して絞るので、名前で当たる語を選ぶ）
+    if win.get("wm_class", "").startswith("firefox"):
+        host = bw.firefox_host(win.get("title", ""))
+        if host:
+            dom = bw.base_domain(host)
+            if any(dom in (i.get("name") or "").lower() for i in items):
+                return dom
+            names = {i.get("name") for i in items
+                     if any(dom in (u or "").lower() for u in (i.get("uris") or []))}
+            if len(names) == 1:
+                return names.pop()
+
+    # それ以外は、題名・アプリ名の語のうち、項目の名前・ユーザー名・フォルダに含まれるもの
+    title = re.sub(r"\s+[—-]\s+Mozilla Firefox$", "", win.get("title", ""))
+    words = re.findall(r"\w+", f"{title} {win.get('wm_class', '').split('.')[-1]}".lower())
+    entries = [" ".join(str(i.get(k) or "") for k in ("name", "user", "folder")).lower() for i in items]
+    for w in words:
+        if len(w) >= 3 and w not in STOPWORDS and any(w in e for e in entries):
+            return w
+    return ""
+
+
+# ---- キー説明 ----
+TARGET_NAMES = {"username": bw.tr("ユーザー名", "username"), "password": bw.tr("パスワード", "password"),
+                "totp": bw.tr("ワンタイムコード", "one-time code"), "notes": bw.tr("メモ", "notes"),
+                "tab": "Tab", "enter": "Enter", "delay": bw.tr("（待つ）", "(wait)")}
+
+
+def width(s):
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+
+
+def pad(s, n):
+    return s + " " * max(0, n - width(s))
+
+
+def read_keybindings():
+    try:
+        with open(bw.RC_FILE, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"\s*keybindings\s*[=:]\s*(.+)", line)
+                if m:
+                    return m.group(1).strip()
+    except OSError:
+        pass
+    return DEFAULT_KEYBINDINGS
+
+
+def help_message():
+    typing, copying, other = bw.tr("入力", "Type"), bw.tr("コピー", "Copy"), bw.tr("その他", "Other")
+    groups = {typing: [], copying: [], other: []}
+    for kb in read_keybindings().split(","):
+        parts = kb.strip().split(":")
+        if len(parts) < 2:
+            continue
+        key, action, targets = parts[0], parts[1], [t for t in parts[2:] if t]
+        if "menu" in targets:
+            groups[other].append((key, bw.tr("項目を選んでから、入れる中身を選ぶ", "pick an item, then choose what to type")))
+        elif action == "sync":
+            groups[other].append((key, bw.tr("保管庫をサーバーと同期", "sync the vault with the server")))
+        elif action in ("type", "copy"):
+            names = [TARGET_NAMES.get(t, t) for t in targets]
+            label = (" → ".join(names) if len(names) > 1 else bw.tr(f"{names[0]}だけ", f"{names[0]} only") if names
+                     else bw.tr("既定の中身", "default"))
+            if action == "type" and targets == ["username", "tab", "password"]:
+                key = f"Enter / {key}"
+            groups[typing if action == "type" else copying].append((key, label))
+    if not any(k.startswith("Enter") for k, _ in groups[typing]):
+        groups[typing].insert(0, ("Enter", " → ".join(TARGET_NAMES[t] for t in ("username", "tab", "password"))))
+    groups[other].append(("Esc", bw.tr("閉じる", "close")))
+    groups[other].append((bw.hotkey_label(bw.CONFIG["hotkeys"]["new"]),
+                          bw.tr("新しいパスワードを作って保存（この一覧を閉じてから）",
+                                "generate and save a new password (close this list first)")))
+
+    groups = {k: v for k, v in groups.items() if v}
+    keyw = max(width(k) for rows in groups.values() for k, _ in rows)
+    lines = []
+    for head, rows in groups.items():
+        for i, (k, label) in enumerate(rows):
+            h = pad(head if i == 0 else "", 8)
+            lines.append(f"<span foreground='#a0a0a0'>{html.escape(h)}</span>"
+                         f"<b>{html.escape(pad(k, keyw))}</b>  {html.escape(label)}")
+    return "\n".join(lines)
+
+
+# ---- 本体 ----
+def remember_used(before):
+    """一覧で選ばれた項目（rofi-rbw が回数を増やした行）を記録する。選ばれなければ何もしない。"""
+    old = {h: n for _, h, n in before}
+    changed = [h for _, h, n in bw.read_runcache() if old.get(h) != n]
+    if len(changed) == 1:
+        bw.remember(changed[0])
+
+
+def main():
+    win = bw.focused_window()
+    if not bw.authorize():
+        bw.notify(bw.tr("中止しました（本人確認ができませんでした）", "Cancelled (could not verify your identity)"))
+        return 1
+
+    extra = ["-mesg", help_message()]
+    h = bw.recent_hash()
+    if not (h and bw.put_first(h, bw.read_runcache())):
+        term = pick_filter(win)
+        if term:
+            extra += ["-filter", term]
+    before = bw.read_runcache()
+
+    layout = bw.detect_layout()
+    env = dict(bw.dotool_env(*layout), BW_AUTOTYPE_ROFI_EXTRA=json.dumps(extra))
+    with bw.plain_ime(*layout):
+        rc = subprocess.run(["rofi-rbw", *sys.argv[1:]], env=env).returncode
+    remember_used(before)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

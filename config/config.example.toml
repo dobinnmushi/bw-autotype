@@ -1,0 +1,48 @@
+# bw-autotype settings. Copy to ~/.config/bw-autotype/config.toml (install.sh does this if it is missing).
+# Every key is optional; the values shown are the defaults.
+
+# Display language: "auto" (from LANG), "ja" or "en"
+# language = "auto"
+
+[keyboard]
+# XKB layout passed to dotool. "auto" reads it from the current IBus engine or GNOME's input sources.
+# layout = "auto"        # e.g. "us", "jp", "de"
+# variant = ""           # e.g. "dvorak" (used only when layout is not "auto")
+# IBus engine to switch to while typing, so an input method (Mozc, Anthy, Pinyin, ...) does not
+# turn the typed letters into other characters. "auto" picks xkb:<layout>::<lang>; "" never switches.
+# plain_ibus_engine = "auto"
+
+[hotkeys]
+# GNOME accelerator syntax. Run ./install.sh again after changing these.
+# autotype = "<Super><Alt>p"
+# new = "<Super><Alt>n"
+
+[auth]
+# What to ask for on each hotkey press while the vault is unlocked:
+#   "fingerprint"  fingerprint every time (falls back to locking and asking for the master password)
+#   "none"         nothing (anyone at your unlocked session can type your passwords)
+#   "auto"         "fingerprint" if a fingerprint is enrolled in fprintd, otherwise "none"
+# When the vault is locked, the master password is always asked.
+# method = "auto"
+# fingerprint_tries = 3
+# fingerprint_timeout = 15     # seconds per attempt
+
+[autotype]
+# An item used within this many seconds is preselected at the top of the list
+# (username on one page, then password on the next page).
+# recent_seconds = 300
+# Wait after the original window regains focus before typing (seconds)
+# settle_seconds = 0.25
+
+[new]
+# Keyboard handling of the new-login form:
+#   "standard"  Tab moves between fields, Enter saves, Esc cancels
+#   "vim"       modal: J/K field, j/k option, i edit, p paste, v show, r regenerate, Enter save, q cancel
+# keys = "standard"
+# Initial password type: "symbols", "alnum", "passphrase" or "pin"
+# kind = "symbols"
+# password_length = 20
+# passphrase_words = 6
+# pin_digits = 6
+# What to do after saving: "once" (type the password), "twice" (password, Tab, password), "none"
+# finish = "once"
