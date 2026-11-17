@@ -92,7 +92,7 @@ Both are also in the Activities overview as "Bitwarden Autotype" and "Bitwarden 
 | `language` | `auto` (from `LANG`), `ja` or `en` |
 | `[keyboard]` | XKB layout for dotool and the IBus engine used while typing (both detected automatically) |
 | `[hotkeys]` | the two hotkeys (run `./install.sh` again after changing) |
-| `[auth]` | `fingerprint`, `none` or `auto` (fingerprint if one is enrolled) |
+| `[auth]` | `fingerprint`, `none` or `auto` (fingerprint if one is enrolled). Use `none` with [bw-vault](#with-bw-vault-optional) |
 | `[autotype]` | sync before the list when the local vault is older than `sync_minutes` (10); how long the last item stays preselected; delay before typing; when copies are cleared; key help (`full`/`line`/`none`); list window (`gtk`/`rofi`) |
 | `[ssh]` | how long one confirmation covers SSH signatures |
 | `[new]` | form keys (`standard` / `vim`), default password type and lengths, what to do after saving |
@@ -104,12 +104,34 @@ rofi-rbw's own options are in `config/rofi-rbw.rc`. With `autotype.selector = "r
 - With `auth.method = "fingerprint"`, every hotkey press asks for a fingerprint. If the sensor is unavailable or
   does not match, the vault is locked again and the master password is asked — never a weaker path.
 - The vault stays unlocked in rbw-agent's memory until rbw's `lock_timeout`. The fingerprint only guards the
-  hotkeys: any program running as you can still run `rbw get`. Lock your screen when you leave.
+  hotkeys: any program running as you can still run `rbw get`. Lock your screen when you leave
+  (or use [bw-vault](#with-bw-vault-optional), which closes that gap).
 - Passwords are never written to files, logs or notifications. They are passed to dotool and `rbw add` on stdin.
 - Typing waits until the original window has focus again, plus `autotype.settle_seconds` before the first field.
   Keys go through a resident dotoold (started on demand, its pipe in `$XDG_RUNTIME_DIR/bw-autotype/`), which
   avoids dotool's ~0.7 s start-up for every field.
 - Logs: `journalctl -t bw-autotype` (which identity check was used and whether something was saved; no secrets).
+
+## With bw-vault (optional)
+[bw-vault](https://github.com/dobinnmushi/bw-vault) (companion, to be published) keeps the vault key under a separate
+user (`bwvault`) and asks polkit — your fingerprint, then your password, like `sudo` — before every secret leaves it.
+bw-autotype works with or without it and switches by itself; nothing here needs to be rewritten.
+
+- **How it switches:** the typing and the list go through `rbw`, which bw-vault replaces with a wrapper, so they need no change.
+  Only saving an SSH key (`lib/bwvault.py`) looks for bw-vault's socket (`/run/bwvault-gate/gate.sock`; override with
+  `BWVAULT_GATE_SOCKET`) and, if it exists, hands the key over instead of using rbw's token directly.
+- **Set `[auth] method = "none"`.** bw-vault asks for you: once to show the list (a 20-second window) and once for the item
+  you pick (the dialog names the item). Keeping the fingerprint here would ask a third time. Without bw-vault, keep the default.
+- **Typing or copying only the username** (Alt+2, Alt+u) asks just once, for the list. When bw-vault is present, bw-autotype sets
+  `ROFI_RBW_FETCH_PUBLIC=1` for rofi-rbw, and a rofi-rbw that understands it (the fork's `fetch-public` branch) fetches the item without
+  its secrets, which the gate returns after the list confirmation alone. Any other rofi-rbw ignores the variable and fetches the whole item,
+  with its own confirmation. Enter (username, Tab, password) and the Alt+m menu always fetch the whole item.
+- **What it changes in "Security notes" above:** the vault key is no longer in your user's memory, so "any program running
+  as you can still run `rbw get`" does not hold; every secret needs a confirmation.
+- **SSH:** use bw-vault's SSH agent (it asks per signature, bound to the key and the parent process) instead of
+  `./install.sh --ssh` below.
+- **Differences:** Steam Guard codes (`steam://`) are not supported; `rbw search`, `edit` and `remove` are unavailable through
+  bw-vault's wrapper (this tool calls none of them).
 
 ## Passkeys
 For passkeys, use the companion **[bw-passkey](https://github.com/dobinnmushi/bw-passkey)**: a virtual FIDO2
@@ -123,6 +145,8 @@ This tool itself does not handle passkeys (rbw 1.15 does not read them):
   passkey: rbw re-sends the item without its passkey data, which may remove the passkey (not verified).
 
 ## SSH keys (optional)
+(With [bw-vault](#with-bw-vault-optional), use its SSH agent instead of the one described here.)
+
 rbw-agent can sign SSH logins with the SSH keys in your vault, but it never asks before signing.
 `./install.sh --ssh` puts **bw-ssh-agent** in front of it: ssh and git talk to bw-ssh-agent, which passes key
 listings straight through and asks for your fingerprint (or the master password, as for typing) before each
@@ -159,11 +183,13 @@ systemd/bw-ssh-agent.*       systemd user socket and service for bw-ssh-agent
    ```
    For fingerprints, enroll one in GNOME Settings (fprintd).
 2. rbw: put `rbw` and `rbw-agent` from `rbw_*_linux_amd64.tar.gz` on the [releases page](https://github.com/doy/rbw/releases) into `~/.local/bin`.
-3. rofi-rbw, with support for identities and for older wl-clipboard (proposed upstream; until then a fork):
+3. rofi-rbw, from the fork: it adds identities and older wl-clipboard support (both proposed upstream), and, with
+   [bw-vault](https://github.com/dobinnmushi/bw-vault), fetches an item without its secrets when you only type or copy the username:
    ```
-   pipx install "rofi-rbw @ git+https://github.com/dobinnmushi/rofi-rbw@identity"
+   pipx install "rofi-rbw @ git+https://github.com/dobinnmushi/rofi-rbw@fetch-public"
    ```
-   Plain `pipx install rofi-rbw` also works, without identities (bw-autotype copes with older wl-clipboard itself).
+   Plain `pipx install rofi-rbw` also works, without identities (bw-autotype copes with older wl-clipboard itself);
+   with bw-vault, typing only the username then asks for the item's confirmation as well.
 4. Install and enable the GNOME extension Window Calls.
 5. `./install.sh --build-dotool` (builds dotool; afterwards plain `./install.sh` is enough).
    Add `--chrome` if you use Chrome, Chromium or Brave: it adds a launcher that starts the browser with
