@@ -185,11 +185,13 @@ systemd/bw-ssh-agent.*       bw-ssh-agent の systemd のユーザー用ソケ�
    ```
    指紋を使うなら、GNOME の設定で指紋を登録しておく（fprintd）。
 2. rbw: [GitHub のリリース](https://github.com/doy/rbw/releases)の `rbw_*_linux_amd64.tar.gz` から `rbw` と `rbw-agent` を `~/.local/bin` へ。
-3. rofi-rbw。個人情報と、古い wl-clipboard に対応した版（本家へ提案中。それまではフォーク）:
+3. rofi-rbw はフォークから入れる。個人情報と古い wl-clipboard への対応（どちらも本家へ提案中）に加え、
+   [bw-vault](https://github.com/dobinnmushi/bw-vault) と使うとき、ユーザー名だけを入力・コピーする操作では、秘密を除いた項目を取る:
    ```
-   pipx install "rofi-rbw @ git+https://github.com/dobinnmushi/rofi-rbw@identity"
+   pipx install "rofi-rbw @ git+https://github.com/dobinnmushi/rofi-rbw@fetch-public"
    ```
    普通の `pipx install rofi-rbw` でも動く（個人情報が使えないだけ。古い wl-clipboard には bw-autotype 側で対応している）。
+   ただし bw-vault と使うと、ユーザー名だけの入力でも、項目の確認が出る。
 4. GNOME 拡張 Window Calls を入れて有効にする。
 5. `./install.sh --build-dotool`（dotool のビルドを含む。2回目以降は `./install.sh` だけ）。
    Chrome・Chromium・Brave を使うなら `--chrome` も付ける。アドレスバーを読むのに要る `--force-renderer-accessibility` を

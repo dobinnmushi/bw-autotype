@@ -183,11 +183,13 @@ systemd/bw-ssh-agent.*       systemd user socket and service for bw-ssh-agent
    ```
    For fingerprints, enroll one in GNOME Settings (fprintd).
 2. rbw: put `rbw` and `rbw-agent` from `rbw_*_linux_amd64.tar.gz` on the [releases page](https://github.com/doy/rbw/releases) into `~/.local/bin`.
-3. rofi-rbw, with support for identities and for older wl-clipboard (proposed upstream; until then a fork):
+3. rofi-rbw, from the fork: it adds identities and older wl-clipboard support (both proposed upstream), and, with
+   [bw-vault](https://github.com/dobinnmushi/bw-vault), fetches an item without its secrets when you only type or copy the username:
    ```
-   pipx install "rofi-rbw @ git+https://github.com/dobinnmushi/rofi-rbw@identity"
+   pipx install "rofi-rbw @ git+https://github.com/dobinnmushi/rofi-rbw@fetch-public"
    ```
-   Plain `pipx install rofi-rbw` also works, without identities (bw-autotype copes with older wl-clipboard itself).
+   Plain `pipx install rofi-rbw` also works, without identities (bw-autotype copes with older wl-clipboard itself);
+   with bw-vault, typing only the username then asks for the item's confirmation as well.
 4. Install and enable the GNOME extension Window Calls.
 5. `./install.sh --build-dotool` (builds dotool; afterwards plain `./install.sh` is enough).
    Add `--chrome` if you use Chrome, Chromium or Brave: it adds a launcher that starts the browser with
