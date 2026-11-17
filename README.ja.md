@@ -98,7 +98,7 @@ bw-autotype は rbw と rofi-rbw の上に、足りないものを足してい�
 | `language` | 表示の言語。`auto`（LANG を見る）・`ja`・`en` |
 | `[keyboard]` | dotool に渡す配列と、入力中に切り替える IBus エンジン（どちらも自動で判別） |
 | `[hotkeys]` | 2つのホットキー（変えたら `./install.sh` を実行し直す） |
-| `[auth]` | 本人確認。`fingerprint`・`none`・`auto`（指紋が登録されていれば fingerprint） |
+| `[auth]` | 本人確認。`fingerprint`・`none`・`auto`（指紋が登録されていれば fingerprint）。[bw-vault](#bw-vault-と一緒に使う任意) と使うときは `none` |
 | `[autotype]` | 手元の保管庫が `sync_minutes`（10分）より古ければ一覧の前に同期、直前の項目を先頭に置く秒数、入力を始めるまでの待ち、コピーを消すまでの秒数、キー説明（`full`/`line`/`none`）、一覧の画面（`gtk`/`rofi`） |
 | `[ssh]` | SSH の署名で、一度の確認を使い回す秒数 |
 | `[new]` | フォームの操作（`standard` / `vim`）、パスワードの種類と長さの既定、保存後の動作 |
@@ -110,11 +110,27 @@ rofi-rbw 自体の設定は `config/rofi-rbw.rc`。`autotype.selector = "rofi"` 
 - `auth.method = "fingerprint"` なら、ホットキーのたびに指紋を求める。指紋が使えない・一致しないときは、
   保管庫をロックし直してマスターパスワードを聞く（それより弱い経路にはしない）。
 - 保管庫は rbw の `lock_timeout` まで rbw-agent のメモリ上で開いたまま。指紋で守れるのはホットキーの入口だけで、
-  ログイン中の自分の権限のプログラムは `rbw get` で読める。席を立つときは画面ロック。
+  ログイン中の自分の権限のプログラムは `rbw get` で読める。席を立つときは画面ロック
+  （この穴をふさぐのが [bw-vault](#bw-vault-と一緒に使う任意)）。
 - パスワードはファイル・ログ・通知に出さない。dotool と `rbw add` には標準入力で渡す。
 - 入力は、元のウィンドウが前面に戻ったことを確かめ、最初の欄の前だけさらに `autotype.settle_seconds` 待ってから行う。
   キーは常駐の dotoold（必要なときに起動。命令の口は `$XDG_RUNTIME_DIR/bw-autotype/`）に送るので、欄ごとに dotool の起動（約 0.7 秒）を待たない。
 - 記録: `journalctl -t bw-autotype`（本人確認の経路と保存の有無だけ。認証情報は書かない）。
+
+## bw-vault と一緒に使う（任意）
+[bw-vault](https://github.com/dobinnmushi/bw-vault)（姉妹品。公開予定）は、保管庫の鍵を別のユーザー（`bwvault`）に置き、
+秘密を出す前に polkit（指紋、だめなら `sudo` と同じパスワード）で本人確認をする。bw-autotype は、あっても無くても動き、
+自動で切り替わる。こちらの書き換えは要らない。
+
+- **切り替わり方：** 入力と一覧は `rbw` を呼ぶだけで、bw-vault がその `rbw` をラッパーに差し替えるので、変更は要らない。
+  SSH キーの保存（`lib/bwvault.py`）だけが bw-vault のソケット（`/run/bwvault-gate/gate.sock`。`BWVAULT_GATE_SOCKET` で変えられる）を探し、
+  あれば rbw のトークンを直接使わずに、鍵を bw-vault に渡す。
+- **`[auth] method = "none"` にする。** 確認は bw-vault がする。一覧を出すとき（20 秒の窓）と、選んだ項目のとき（画面に項目名が出る）の2回。
+  ここでも指紋を求めると3回になる。bw-vault なしなら、既定のままにする。
+- **上の「安全のための決まり」への影響：** 保管庫の鍵が、あなたのユーザーのメモリから無くなるので、
+  「ログイン中の自分の権限のプログラムは `rbw get` で読める」は当てはまらない。秘密は、すべて確認を通す。
+- **SSH：** 下の `./install.sh --ssh` の代わりに、bw-vault の SSH エージェント（署名のたびに、鍵と親プロセスに結び付けて確認する）を使う。
+- **違い：** Steam Guard のコード（`steam://`）は未対応。`rbw search`・`edit`・`remove` は、bw-vault のラッパー経由では使えない（この道具は、どれも呼ばない）。
 
 ## パスキー
 パスキーには、姉妹品の **[bw-passkey](https://github.com/dobinnmushi/bw-passkey)** を使う。Bitwarden の保管庫にある
@@ -128,6 +144,8 @@ rofi-rbw 自体の設定は `config/rofi-rbw.rc`。`autotype.selector = "rofi"` 
   rbw はパスキーの欄を持たない形で項目を送り直すので、パスキーが消える恐れがある（確かめてはいない）。
 
 ## SSH キー（任意）
+（[bw-vault](#bw-vault-と一緒に使う任意) を使うときは、ここで説明するものの代わりに、その SSH エージェントを使う。）
+
 rbw-agent は保管庫の SSH キーで SSH のログインに署名できるが、署名の前に確認はしない。
 `./install.sh --ssh` で、その手前に **bw-ssh-agent** を置く。ssh や git は bw-ssh-agent に話しかけ、
 鍵の一覧はそのまま rbw に渡し、署名の前には指紋（だめならマスターパスワード。入力のときと同じ）を求める。

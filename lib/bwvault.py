@@ -111,8 +111,21 @@ def _folder_id(name):
     return created.get("id") or created.get("Id")
 
 
+def _gate_socket():
+    """bw-vault（保管庫の鍵を別ユーザーに置く門）が入っていれば、そのソケットのパス"""
+    path = os.environ.get("BWVAULT_GATE_SOCKET", "/run/bwvault-gate/gate.sock")
+    return path if os.path.exists(path) else None
+
+
 def save_ssh_key(name, folder, private_key, public_key, fingerprint):
     """SSH キーの項目を保管庫に作る"""
+    if _gate_socket():
+        # 門が暗号化・送信・本人確認をする（この側は保管庫の鍵もトークンも持たない）。秘密は標準入力で渡す
+        r = bw.run(["bwv", "add", "--ssh", *(["--folder", folder] if folder else []), name],
+                   input=json.dumps({"private_key": private_key, "public_key": public_key, "fingerprint": fingerprint}))
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr.strip() or "bwv add failed")
+        return 0
     cipher = {
         "type": TYPE_SSH_KEY,
         "folderId": _folder_id(folder),
