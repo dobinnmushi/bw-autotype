@@ -122,6 +122,10 @@ bw-autotype works with or without it and switches by itself; nothing here needs 
   `BWVAULT_GATE_SOCKET`) and, if it exists, hands the key over instead of using rbw's token directly.
 - **Set `[auth] method = "none"`.** bw-vault asks for you: once to show the list (a 20-second window) and once for the item
   you pick (the dialog names the item). Keeping the fingerprint here would ask a third time. Without bw-vault, keep the default.
+- **Typing or copying only the username** (Alt+2, Alt+u) asks just once, for the list. When bw-vault is present, bw-autotype sets
+  `ROFI_RBW_FETCH_PUBLIC=1` for rofi-rbw, and a rofi-rbw that understands it (the fork's `fetch-public` branch) fetches the item without
+  its secrets, which the gate returns after the list confirmation alone. Any other rofi-rbw ignores the variable and fetches the whole item,
+  with its own confirmation. Enter (username, Tab, password) and the Alt+m menu always fetch the whole item.
 - **What it changes in "Security notes" above:** the vault key is no longer in your user's memory, so "any program running
   as you can still run `rbw get`" does not hold; every secret needs a confirmation.
 - **SSH:** use bw-vault's SSH agent (it asks per signature, bound to the key and the parent process) instead of

@@ -222,6 +222,10 @@ def main():
     h = bw.recent_hash()
     recent_first = bool(h and bw.put_first(h, bw.read_runcache()))
     env_extra = {"BW_AUTOTYPE_TARGET_WIN": str(win.get("id") or "")}
+    if os.path.exists(os.environ.get("BWVAULT_GATE_SOCKET", "/run/bwvault-gate/gate.sock")):
+        # bw-vault（保管庫の鍵を別ユーザーに置く門）があるとき: ユーザー名だけを入力・コピーする操作では、秘密を除いた項目を取らせる
+        # （門が、項目の確認を出さずに済む）。rofi-rbw のフォーク（ROFI_RBW_FETCH_PUBLIC に対応）だけが読み、知らない版は無視する
+        env_extra["ROFI_RBW_FETCH_PUBLIC"] = "1"
     if bw.CONFIG["autotype"]["selector"] == "rofi":
         # rofi: 直前の項目がなければ、合う語を絞り込み欄に入れる
         if term and not recent_first:
