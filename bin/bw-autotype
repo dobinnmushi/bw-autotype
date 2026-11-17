@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import unicodedata
 
@@ -246,8 +247,19 @@ def main():
 
     layout = bw.detect_layout()
     env = dict(bw.dotool_env(*layout), BW_AUTOTYPE_ROFI_EXTRA=json.dumps(extra), **env_extra)
-    with bw.plain_ime(*layout):
-        rc = subprocess.run(["rofi-rbw", *sys.argv[1:]], env=env).returncode
+    # rofi-rbw の標準エラーは、パイプではなく一時ファイルで受ける。パイプだと、rofi-rbw が起動した常駐のプロセス
+    # （貼り付けに応える wl-copy など）がパイプを引き継いだとき、それが終わるまで、ここで待ち続けてしまう
+    with tempfile.TemporaryFile() as errfile:
+        with bw.plain_ime(*layout):
+            rc = subprocess.run(["rofi-rbw", *sys.argv[1:]], env=env, stderr=errfile).returncode
+        errfile.seek(0)
+        raw = errfile.read().decode(errors="replace")
+    err = raw.strip()
+    if err:
+        sys.stderr.write(raw)              # 端末から手で動かしたときは、これまでどおり見える
+    if rc != 0 or err:
+        # 「何も起きない」ときの原因を、記録に残す（rofi-rbw の終了コードと、標準エラーの末尾。認証情報は含まれない）
+        bw.log(f"rofi-rbw: exit {rc}" + (f", stderr: {err[-400:]!r}" if err else ""))
     remember_used(before)
     return rc
 
