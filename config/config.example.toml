@@ -5,11 +5,12 @@
 # language = "auto"
 
 [keyboard]
-# XKB layout passed to dotool. "auto" reads it from the current IBus engine or GNOME's input sources.
+# XKB layout passed to dotool. "auto" reads it from the current IBus engine, KDE's keyboard layout (kxkbrc) or GNOME's input sources.
 # layout = "auto"        # e.g. "us", "jp", "de"
 # variant = ""           # e.g. "dvorak" (used only when layout is not "auto")
 # IBus engine to switch to while typing, so an input method (Mozc, Anthy, Pinyin, ...) does not
-# turn the typed letters into other characters. "auto" picks xkb:<layout>::<lang>; "" never switches.
+# turn the typed letters into other characters. "auto" picks xkb:<layout>::<lang> (fcitx5: keyboard-<layout>, if it is in
+# the fcitx5 profile); "" never switches.
 # plain_ibus_engine = "auto"
 
 [hotkeys]

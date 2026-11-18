@@ -13,7 +13,7 @@ Firefox の about:config・端末・普通のアプリなど、ブラウザ拡�
 | 保管庫（Bitwarden 互換の非公式クライアント） | [rbw](https://github.com/doy/rbw) |
 | 項目一覧と入力・コピー | [rofi-rbw](https://github.com/fdw/rofi-rbw)。一覧の画面は自作の GTK4 のウィンドウ（rofi にもできる） |
 | キー入力の送信 | [dotool](https://git.sr.ht/~geb/dotool)（uinput。キーボード配列に合わせるので、US 以外の配列でも記号がずれない） |
-| 前面ウィンドウの取得 | GNOME 拡張 [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) |
+| 前面ウィンドウの取得 | GNOME: 拡張 [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/)。KDE Plasma: [kdotool](https://github.com/jinliu/kdotool) |
 | 表示中のページの URL（Firefox・Chrome・Chromium・Brave） | AT-SPI（アクセシビリティ）でアドレスバーを読む |
 | 本人確認 | fprintd（指紋）→ だめなら rbw のマスターパスワード |
 
@@ -198,7 +198,8 @@ systemd/bw-ssh-agent.*       bw-ssh-agent の systemd のユーザー用ソケ�
    ```
    普通の `pipx install rofi-rbw` でも動く（個人情報が使えないだけ。古い wl-clipboard には bw-autotype 側で対応している）。
    ただし bw-vault と使うと、ユーザー名だけの入力でも、項目の確認が出る。
-4. GNOME 拡張 Window Calls を入れて有効にする。
+4. GNOME は拡張 Window Calls を入れて有効にする。KDE Plasma（Wayland）は [kdotool](https://github.com/jinliu/kdotool) を `~/.local/bin` に入れる
+   （`cargo install kdotool --root ~/.local`。`libdbus-1-dev` がなければ、依存の `dbus` の `vendored` 機能を有効にしてビルドする）。
 5. `./install.sh --build-dotool`（dotool のビルドを含む。2回目以降は `./install.sh` だけ）。
    Chrome・Chromium・Brave を使うなら `--chrome` も付ける。アドレスバーを読むのに要る `--force-renderer-accessibility` を
    付けて起動するランチャーを作る（ブラウザが少し重くなるかもしれない）。
@@ -219,7 +220,8 @@ systemd/bw-ssh-agent.*       bw-ssh-agent の systemd のユーザー用ソケ�
 - GNOME は layer-shell に対応しないので、wofi・fuzzel・Wayland 版の rofi は動かない（selector = "rofi" のときは XWayland で動かす）。
 - Mozc が「あ」のとき、Shift を含むショートカットは GNOME に届かない（そのためホットキーは Super+Alt+…）。
 - Chrome 系のブラウザは `--force-renderer-accessibility` を付けて起動したときだけアドレスバーを読める（`install.sh --chrome`）。付けなければ題名だけで絞り込む。
-- できないこと: パスキー（bw-passkey を使う）、項目の編集、GNOME 以外のデスクトップ。
+- KDE Plasma 6（Wayland）は fcitx5 との組み合わせで動く: `install.sh` が KDE にショートカットを登録し（ほかの操作が使っているキーは奪わず、知らせる）、入力の間は fcitx5 を `keyboard-配列` に切り替える。確かめたのは、前面ウィンドウの扱い・入力・GTK の一覧・ショートカット登録で、保管庫まで通した全体の流れは未確認。
+- できないこと: パスキー（bw-passkey を使う）、項目の編集、GNOME と KDE Plasma 以外のデスクトップ。
 - 「直前の項目」は rofi-rbw の `~/.cache/rofi-rbw.runcache` の並び順を使う。rofi-rbw の更新で形式が変わると効かなくなりうる。
 
 ## ライセンス

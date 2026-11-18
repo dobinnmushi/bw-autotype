@@ -100,8 +100,8 @@ def main():
     continuing = now - last < CONTINUE_SECONDS
 
     target = os.environ.get("BW_AUTOTYPE_TARGET_WIN", "")
-    if target.isdigit():
-        if not bw.wait_focus(int(target), seconds=2.0):
+    if target:
+        if not bw.wait_focus(target, seconds=2.0):
             bw.notify(bw.tr("元のウィンドウに戻れなかったため、入力しませんでした",
                             "Not typed: the original window did not get focus back"), urgent=True)
             sys.exit(1)

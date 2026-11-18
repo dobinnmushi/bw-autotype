@@ -105,28 +105,57 @@ if $ssh; then
         "SSH agent: SSH_AUTH_SOCK=\$XDG_RUNTIME_DIR/bw-ssh-agent/socket (log in again for all apps to use it)"
 fi
 
-# ---- ショートカット（既存のカスタムショートカットは消さず、足すだけ。キーは設定ファイルの [hotkeys]）----
+# ---- ショートカット（既存のショートカットは消さず、足すだけ。キーは設定ファイルの [hotkeys]）----
+# GNOME: gsettings のカスタムショートカット。KDE: ランチャーの X-KDE-Shortcuts と kglobalaccel への登録。
+# どちらの環境も入っていれば両方に登録する（もう一方に切り替えたときも使えるように）。
 python3 -I - "$HOME" "$R/lib" <<'EOF'
-import ast, subprocess, sys
+import ast, os, re, subprocess, sys
 home = sys.argv[1]
 sys.path.insert(0, sys.argv[2])
 import bwcommon as bw
-K = "org.gnome.settings-daemon.plugins.media-keys"
-BASE = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
 hk = bw.CONFIG["hotkeys"]
 keys = [("bw-autotype", bw.tr("Bitwarden 自動入力", "Bitwarden Autotype"), f"{home}/.local/bin/bw-autotype", hk["autotype"]),
         ("bw-new", bw.tr("Bitwarden 新規登録", "Bitwarden New Login"), f"{home}/.local/bin/bw-new", hk["new"])]
-cur = ast.literal_eval(subprocess.run(["gsettings", "get", K, "custom-keybindings"],
-                                      capture_output=True, text=True).stdout.strip().removeprefix("@as "))
-for kid, name, cmd, binding in keys:
-    path = f"{BASE}{kid}/"
-    schema = f"{K}.custom-keybinding:{path}"
-    for k, v in (("name", name), ("command", cmd), ("binding", binding)):
-        subprocess.run(["gsettings", "set", schema, k, v], check=True)
-    if path not in cur:
-        cur.append(path)
-    print(bw.tr("ショートカット: ", "Hotkey: ") + f"{binding} → {name}")
-subprocess.run(["gsettings", "set", K, "custom-keybindings", str(cur)], check=True)
+
+K = "org.gnome.settings-daemon.plugins.media-keys"
+BASE = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
+if K in bw.run(["gsettings", "list-schemas"]).stdout.split():
+    cur = ast.literal_eval(bw.run(["gsettings", "get", K, "custom-keybindings"]).stdout.strip().removeprefix("@as "))
+    for kid, name, cmd, binding in keys:
+        path = f"{BASE}{kid}/"
+        schema = f"{K}.custom-keybinding:{path}"
+        for k, v in (("name", name), ("command", cmd), ("binding", binding)):
+            subprocess.run(["gsettings", "set", schema, k, v], check=True)
+        if path not in cur:
+            cur.append(path)
+        print(bw.tr("ショートカット（GNOME）: ", "Hotkey (GNOME): ") + f"{binding} → {name}")
+    subprocess.run(["gsettings", "set", K, "custom-keybindings", str(cur)], check=True)
+
+if bw.run(["busctl", "--user", "status", "org.kde.kglobalaccel"]).returncode == 0:
+    for kid, name, cmd, binding in keys:
+        conv = bw.kde_shortcut(binding)
+        if not conv:
+            print(bw.tr(f"ショートカット（KDE）: {binding} は変換できないので、システム設定で割り当ててください",
+                        f"Hotkey (KDE): cannot convert {binding}; assign it in System Settings"))
+            continue
+        label, code = conv
+        desktop = f"{home}/.local/share/applications/{kid}.desktop"
+        with open(desktop, encoding="utf-8") as f:
+            text = re.sub(r"^X-KDE-Shortcuts=.*\n?", "", f.read(), flags=re.M).rstrip("\n")
+        with open(desktop, "w", encoding="utf-8") as f:
+            f.write(f"{text}\nX-KDE-Shortcuts={label}\n")
+        bw.run(["kbuildsycoca6"])
+        # KDE のショートカット設定と同じ DBus の呼び出し（フラグ 6 = SetPresent | NoAutoloading。後者は、前に
+        # 失敗したときにデーモンが覚えた「割り当てなし」を読み戻させないため）。戻り値が 0 なら、そのキーは他の操作が使っている
+        r = bw.run(["busctl", "--user", "call", "org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel",
+                    "setShortcut", "asaiu", "4", f"{kid}.desktop", "_launch", name, name, "1", str(code), "6"])
+        if r.stdout.split()[-1:] == [str(code)]:
+            print(bw.tr("ショートカット（KDE）: ", "Hotkey (KDE): ") + f"{label} → {name}")
+        else:
+            print(bw.tr(f"ショートカット（KDE）: {label} は他の操作が使っているため、{name} には割り当てていません。"
+                        "システム設定 → キーボード → ショートカットで、使っている側を外すか、別のキーを割り当ててください",
+                        f"Hotkey (KDE): {label} is used by another action, so {name} was not bound. "
+                        "In System Settings → Keyboard → Shortcuts, free that key or pick another"))
 EOF
 
 # ---- 設定 ----

@@ -46,6 +46,9 @@ for p in mine:
     for k in ("name", "command", "binding"):
         subprocess.run(["gsettings", "reset", f"{K}.custom-keybinding:{p}", k])
 ja = (os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or "").startswith("ja")
+for kid in ("bw-autotype", "bw-new"):   # KDE（kglobalaccel に登録していれば外す。なければ何も起きない）
+    subprocess.run(["busctl", "--user", "call", "org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel",
+                    "unregister", "ss", f"{kid}.desktop", "_launch"], capture_output=True)
 print("ショートカットを外しました" if ja else "Removed the hotkeys")
 PY
 

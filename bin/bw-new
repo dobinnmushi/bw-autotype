@@ -573,7 +573,7 @@ def run_form(win_info, items):
 
     def activate(a):
         holder["form"] = Form(a, win_info, items)
-        # ショートカットから起動したとき前面に来ないことがあるので、念のため Window Calls で前面にする
+        # ショートカットから起動したとき前面に来ないことがあるので、念のため前面にする（GNOME は Window Calls、KDE は kdotool）
         GLib.timeout_add(300, lambda: (activate_own_window(), False)[1])
 
     app.connect("activate", activate)
@@ -585,10 +585,7 @@ def run_form(win_info, items):
 
 
 def activate_own_window():
-    for w in bw.windows():
-        if w.get("title") == TITLE and not w.get("focus"):
-            bw.run(["busctl", "--user", "call", "org.gnome.Shell", "/org/gnome/Shell/Extensions/Windows",
-                    "org.gnome.Shell.Extensions.Windows", "Activate", "u", str(w["id"])])
+    bw.activate_window(title=TITLE)
 
 
 def make_ssh_key():

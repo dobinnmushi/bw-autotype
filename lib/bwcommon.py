@@ -44,9 +44,9 @@ def log(text):
 DEFAULTS = {
     "language": "auto",                 # auto（LANG を見る）| ja | en
     "keyboard": {
-        "layout": "auto",               # dotool に渡す XKB 配列。auto は IBus・GNOME の入力ソースから判別
+        "layout": "auto",               # dotool に渡す XKB 配列。auto は IBus・KDE の配列・GNOME の入力ソースから判別
         "variant": "",
-        "plain_ibus_engine": "auto",    # 入力中に切り替える IBus エンジン。"" なら切り替えない
+        "plain_ibus_engine": "auto",    # 入力中に切り替える IBus エンジン（fcitx5 は keyboard-配列 を自動で選ぶ）。"" なら切り替えない
     },
     "hotkeys": {"autotype": "<Super><Alt>p", "new": "<Super><Alt>n"},
     "auth": {
@@ -119,6 +119,21 @@ def hotkey_label(binding):
     mods = re.findall(r"<(\w+)>", binding)
     key = re.sub(r"<\w+>", "", binding)
     return "+".join([*mods, key.upper() if len(key) == 1 else key])
+
+
+QT_MODS = {"Super": ("Meta", 0x10000000), "Alt": ("Alt", 0x08000000),
+           "Control": ("Ctrl", 0x04000000), "Primary": ("Ctrl", 0x04000000), "Shift": ("Shift", 0x02000000)}
+
+
+def kde_shortcut(binding):
+    """GNOME の書式（<Super><Alt>p）を KDE 用の (表記 "Meta+Alt+P", Qt のキー値) にする。
+    英数字 1 文字のキーだけ対応。変換できなければ None。"""
+    mods = re.findall(r"<(\w+)>", binding)
+    key = re.sub(r"<\w+>", "", binding)
+    if len(key) != 1 or not key.isalnum() or any(m not in QT_MODS for m in mods):
+        return None
+    return ("+".join([*(QT_MODS[m][0] for m in mods), key.upper()]),
+            sum(QT_MODS[m][1] for m in mods) + ord(key.upper()))
 
 
 APP_NAME = tr("Bitwarden 自動入力", "Bitwarden Autotype")
@@ -230,19 +245,47 @@ def windows():
         return []
 
 
+def _kde():
+    return "KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")
+
+
+def _kdotool(*args):
+    """kdotool（KWin のスクリプトを DBus で読み込む xdotool 風の道具）の出力。失敗なら ""。"""
+    r = run(["kdotool", *args])
+    return r.stdout.strip("\n") if r.returncode == 0 else ""
+
+
 def focused_window():
-    """前面ウィンドウの {id, wm_class, title}。取れなければ空の dict。"""
+    """前面ウィンドウの {id, wm_class, title}。取れなければ空の dict。id は GNOME では整数、KDE では "{uuid}"。"""
+    if _kde():
+        wid = _kdotool("getactivewindow").strip()
+        if not wid:
+            return {}
+        *title, cls = _kdotool("getwindowname", wid, "getwindowclassname", wid).split("\n")
+        return {"id": wid, "wm_class": cls, "title": "\n".join(title)}
     for w in windows():
         if w.get("focus"):
             return {"id": w.get("id"), "wm_class": w.get("wm_class") or "", "title": w.get("title") or ""}
     return {}
 
 
+def activate_window(wm_class=None, title=None):
+    """wm_class（なければ題名）が一致する、まだ前面でないウィンドウを前面にする。"""
+    if _kde():
+        pattern = "^" + re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", wm_class or title) + "$"
+        run(["kdotool", "search", "--class" if wm_class else "--title", pattern, "windowactivate"])
+        return
+    for w in windows():
+        if not w.get("focus") and (w.get("wm_class") == wm_class if wm_class else w.get("title") == title):
+            run(["busctl", "--user", "call", "org.gnome.Shell", "/org/gnome/Shell/Extensions/Windows",
+                 "org.gnome.Shell.Extensions.Windows", "Activate", "u", str(w["id"])])
+
+
 def wait_focus(win_id, seconds=3.0):
     """win_id のウィンドウが前面に戻るまで待つ。戻れば True。"""
     end = time.time() + seconds
     while time.time() < end:
-        if focused_window().get("id") == win_id:
+        if str(focused_window().get("id")) == str(win_id):
             return True
         time.sleep(0.1)
     return False
@@ -378,8 +421,17 @@ def _gnome_xkb():
     return m.group(1) if m else ""
 
 
+def _kde_xkb():
+    """KDE のキーボード配列のうち最初のもの（"jp"、"us+dvorak" など）。なければ ""。"""
+    def read(key):
+        r = run(["kreadconfig6", "--file", "kxkbrc", "--group", "Layout", "--key", key])
+        return r.stdout.strip().split(",")[0] if r.returncode == 0 else ""
+    layout, variant = read("LayoutList"), read("VariantList")
+    return f"{layout}+{variant}" if layout and variant else layout
+
+
 def detect_layout():
-    """(配列, variant)。今の IBus エンジンの配列 → GNOME の入力ソース → us の順に見る。"""
+    """(配列, variant)。今の IBus エンジンの配列 → デスクトップの配列（KDE: kxkbrc、GNOME: 入力ソース）→ us の順に見る。"""
     kb = CONFIG["keyboard"]
     if kb["layout"] != "auto":
         return kb["layout"], kb["variant"]
@@ -389,7 +441,10 @@ def detect_layout():
         descs = bus.get_engines_by_names([engine])
         if descs and descs[0].get_layout() not in ("", "default"):
             return descs[0].get_layout(), descs[0].get_layout_variant() or ""
-    layout, _, variant = _gnome_xkb().partition("+")
+    kde = "KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")
+    layout, _, variant = (_kde_xkb() if kde else _gnome_xkb()).partition("+")
+    if not layout:
+        layout, _, variant = (_gnome_xkb() if kde else _kde_xkb()).partition("+")
     return (layout, variant) if layout else ("us", "")
 
 
@@ -406,9 +461,59 @@ def plain_engine(layout, variant):
     return next((n for n in names if n.startswith(prefix)), "")
 
 
+def _fcitx5():
+    """fcitx5 が動いていれば (今の入力メソッド名, 入力が有効か)。なければ None。"""
+    state = run(["fcitx5-remote"]).stdout.strip()   # 0=不明・停止 / 1=無効 / 2=有効
+    if state not in ("1", "2"):
+        return None
+    name = run(["fcitx5-remote", "-n"]).stdout.strip()
+    return (name, state == "2") if name else None
+
+
+def _fcitx5_plain_im(layout, variant):
+    """入力中に使う fcitx5 の入力メソッド名（配列そのままの keyboard-xx）。切り替えない設定なら ""。"""
+    if CONFIG["keyboard"]["plain_ibus_engine"] == "":
+        return ""
+    return "keyboard-" + layout + (f"-{variant}" if variant else "")
+
+
+def _fcitx5_switch(name, seconds=0.6):
+    """fcitx5 の入力メソッドを name にし、反映されるまで待つ（fcitx5-remote -s は非同期で、ない名前は黙って無視される）。
+    反映されれば True。"""
+    run(["fcitx5-remote", "-s", name])
+    end = time.time() + seconds
+    while time.time() < end:
+        if run(["fcitx5-remote", "-n"]).stdout.strip() == name:
+            return True
+        time.sleep(0.02)
+    return False
+
+
+@contextlib.contextmanager
+def _plain_fcitx5(layout, variant):
+    """Mozc などが有効なら、入力の間だけ keyboard-配列 にする。切り替えられなければ、全角などで打たないよう通知して終わる。"""
+    fc = _fcitx5()
+    plain = _fcitx5_plain_im(layout, variant) if fc and fc[1] and not fc[0].startswith("keyboard-") else ""
+    if plain and not _fcitx5_switch(plain):
+        log(f"fcitx5: could not switch to {plain}")
+        notify(tr(f"入力メソッド {plain} に切り替えられなかったため、中止しました（fcitx5 の入力メソッドに {plain} があるか確認してください）",
+                  f"Cancelled: could not switch fcitx5 to {plain} (check that it is in the fcitx5 input methods)"), urgent=True)
+        raise SystemExit(1)
+    try:
+        yield
+    finally:
+        if plain:
+            _fcitx5_switch(fc[0])
+            run(["fcitx5-remote", "-o"])
+
+
 @contextlib.contextmanager
 def plain_ime(layout, variant):
-    """この中にいる間だけ IBus を素の配列にし、出るときに元へ戻す（IBus がなければ何もしない）。"""
+    """この中にいる間だけ IBus・fcitx5 を素の配列にし、出るときに元へ戻す（どちらもなければ何もしない）。"""
+    if _fcitx5():
+        with _plain_fcitx5(layout, variant):
+            yield
+        return
     engine = current_ibus_engine()
     plain = plain_engine(layout, variant) if engine and not engine.startswith("xkb:") else ""
     switch = bool(plain) and engine != plain

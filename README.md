@@ -13,7 +13,7 @@ It is mostly a combination of existing tools glued together with thin scripts.
 | Vault (unofficial Bitwarden client) | [rbw](https://github.com/doy/rbw) |
 | Item list, typing and copying | [rofi-rbw](https://github.com/fdw/rofi-rbw), with its list shown in a built-in GTK4 window (or rofi) |
 | Sending keystrokes | [dotool](https://git.sr.ht/~geb/dotool) (uinput; follows your XKB layout, so symbols are typed correctly on non-US layouts) |
-| Focused window | GNOME extension [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) |
+| Focused window | GNOME: extension [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/). KDE Plasma: [kdotool](https://github.com/jinliu/kdotool) |
 | URL of the current page (Firefox, Chrome, Chromium, Brave) | AT-SPI (accessibility) reads the address bar |
 | Identity check | fprintd (fingerprint), falling back to rbw's master password |
 
@@ -197,7 +197,8 @@ systemd/bw-ssh-agent.*       systemd user socket and service for bw-ssh-agent
    ```
    Plain `pipx install rofi-rbw` also works, without identities (bw-autotype copes with older wl-clipboard itself);
    with bw-vault, typing only the username then asks for the item's confirmation as well.
-4. Install and enable the GNOME extension Window Calls.
+4. GNOME: install and enable the extension Window Calls. KDE Plasma (Wayland): install [kdotool](https://github.com/jinliu/kdotool) into `~/.local/bin`
+   (`cargo install kdotool --root ~/.local`; without `libdbus-1-dev`, build it with the `vendored` feature of its `dbus` dependency).
 5. `./install.sh --build-dotool` (builds dotool; afterwards plain `./install.sh` is enough).
    Add `--chrome` if you use Chrome, Chromium or Brave: it adds a launcher that starts the browser with
    `--force-renderer-accessibility`, which is needed to read its address bar (this may make the browser a bit slower).
@@ -218,7 +219,8 @@ systemd/bw-ssh-agent.*       systemd user socket and service for bw-ssh-agent
 - GNOME does not support layer-shell, so wofi, fuzzel and the Wayland build of rofi do not work; with selector = "rofi", rofi runs under XWayland.
 - With Mozc in hiragana mode, shortcuts containing Shift do not reach GNOME (hence Super+Alt+…).
 - Chrome-based browsers expose their address bar only when started with `--force-renderer-accessibility` (`install.sh --chrome`); otherwise the list is filtered by the window title only.
-- Not supported: passkeys (use bw-passkey), editing items, other desktops than GNOME.
+- KDE Plasma 6 (Wayland) is supported with fcitx5: `install.sh` registers the hotkeys with KDE (a key that another action already uses is reported, not taken over), and typing switches fcitx5 to `keyboard-<layout>` meanwhile. Checked there: focus handling, typing, the GTK list, hotkey registration; not the whole vault flow.
+- Not supported: passkeys (use bw-passkey), editing items, desktops other than GNOME and KDE Plasma.
 - "Last used item" relies on the order of rofi-rbw's `~/.cache/rofi-rbw.runcache`; a format change in rofi-rbw could break it.
 
 ## License

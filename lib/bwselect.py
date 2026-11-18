@@ -410,10 +410,7 @@ APP_ID = "local.bwautotype.list"
 
 def activate_own_window():
     # 題名ではなく wm_class で探す（Bitwarden のデスクトップアプリも題名が「Bitwarden」のため）
-    for w in bw.windows():
-        if w.get("wm_class") == APP_ID and not w.get("focus"):
-            bw.run(["busctl", "--user", "call", "org.gnome.Shell", "/org/gnome/Shell/Extensions/Windows",
-                    "org.gnome.Shell.Extensions.Windows", "Activate", "u", str(w["id"])])
+    bw.activate_window(wm_class=APP_ID)
 
 
 def main(argv):
@@ -426,7 +423,7 @@ def main(argv):
 
     def activate(a):
         holder["sel"] = Selector(a, opts, rows, entries)
-        # ショートカットから起動したとき前面に来ないことがあるので、念のため Window Calls で前面にする
+        # ショートカットから起動したとき前面に来ないことがあるので、念のため前面にする（GNOME は Window Calls、KDE は kdotool）
         GLib.timeout_add(250, lambda: (activate_own_window(), False)[1])
 
     app.connect("activate", activate)
