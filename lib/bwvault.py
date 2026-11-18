@@ -10,8 +10,11 @@ rbw の `rbw add` はログインの項目しか作れないので、SSH キー�
 import base64
 import json
 import os
+import shutil
 import socket
+import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import bwcommon as bw
@@ -115,6 +118,46 @@ def _gate_socket():
     """bw-vault（保管庫の鍵を別ユーザーに置く門）が入っていれば、そのソケットのパス"""
     path = os.environ.get("BWVAULT_GATE_SOCKET", "/run/bwvault-gate/gate.sock")
     return path if os.path.exists(path) else None
+
+
+def totp_supported():
+    """フォームに TOTP のシークレット欄を出してよいか。保存できるのは bw-vault の門だけ（標準の rbw add には、その指定がない）"""
+    return bool(_gate_socket()) and bool(shutil.which("bwv"))
+
+
+_BASE32 = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+
+
+def totp_clean(text):
+    """フォームの TOTP 欄の文字を整える。base32 なら、全角を半角に、空白を除いて大文字にする（日本語入力のまま貼った・打った場合）。
+    otpauth:// の URI は、前後の空白だけを除く"""
+    s = text.strip()
+    if s.lower().startswith("otpauth://"):
+        return s
+    return "".join(unicodedata.normalize("NFKC", s).split()).upper().rstrip("=")
+
+
+def totp_problem(text):
+    """TOTP 欄の文字の、貼り間違いを知らせる文面（問題がない・空なら None）。最終的な検証は、保存のときに門が行う"""
+    s = totp_clean(text)
+    if not s:
+        return None
+    if s.lower().startswith("otpauth://"):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(s).query)
+        return None if q.get("secret", [""])[0] else bw.tr("otpauth の URI に secret がありません", "The otpauth URI has no secret")
+    bad = sorted({c for c in s if c not in _BASE32})
+    if bad:
+        return bw.tr(f"使えない文字があります（{' '.join(bad[:5])}）。A–Z と 2–7 だけです",
+                     f"Invalid characters ({' '.join(bad[:5])}); only A–Z and 2–7 are allowed")
+    return None
+
+
+def save_login_with_totp(name, user, uri, folder, password, totp):
+    """TOTP のシークレットつきのログイン項目を、門に作らせる。パスワードと種は標準入力で渡す（引数にも記録にも出さない）。
+    結果は subprocess.CompletedProcess（失敗は returncode と stderr）"""
+    cmd = ["bwv", "add", "--json", *(["--uri", uri] if uri else []), *(["--folder", folder] if folder else []),
+           name, *([user] if user else [])]
+    return bw.run(cmd, input=json.dumps({"password": password, "totp": totp}))
 
 
 def save_ssh_key(name, folder, private_key, public_key, fingerprint):

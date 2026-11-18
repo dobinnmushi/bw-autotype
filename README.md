@@ -73,6 +73,13 @@ address bar. Typing a folder name that does not exist creates it.
 The form asks for the type first (password, passphrase or SSH key); only the fields below it change. For a
 password, the next field chooses the characters (with symbols, letters and digits only, or digits only for PINs).
 
+**TOTP secret (optional):** with [bw-vault](https://github.com/dobinnmushi/bw-vault) installed, the form has a "TOTP" field
+for the setup key a site shows when you enable two-step login. It is masked (the eye button shows it), full-width characters,
+spaces and lower case are cleaned up, and a mistake (for example a stray character) is flagged next to the field before you can
+save. The secret goes to the vault through standard input, and afterwards the clipboard is cleared if it still holds the same
+secret. The vault's gate never gives the secret back: it only returns the current six-digit code. This creates a **new** item; adding
+a secret to an existing item is not supported. Without bw-vault the field is not shown (stock `rbw add` cannot store a TOTP secret).
+
 **SSH keys:** choose "SSH key (Ed25519)" as the type. The fields below the type change: username, URI and
 length disappear, and the key is created when you save (`ssh-keygen` in `$XDG_RUNTIME_DIR`, removed right away),
 saved to the vault as an SSH key item, and its public key is typed into the focused field (for example GitHub's

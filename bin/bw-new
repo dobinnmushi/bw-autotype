@@ -10,6 +10,9 @@
                     v: パスワードの表示切替  r: 作り直し  Enter: 保存して入力  q: やめる
     入力モード      普通に文字を打てる。Esc か Enter でノーマルモードへ戻る
 生成は `rbw generate`（名前なし＝保存しない）で行い、保存は `rbw add` に標準入力で渡す（一時ファイルを作らない）。
+TOTP のシークレット欄（任意）は、bw-vault の門があるときだけ出る（標準の rbw add には、その指定がないため）。
+伏せ字で入れ、全角・空白・小文字は整えて保存する。保存は `bwv add --json` に標準入力で渡し、保存したあと、
+クリップボードにまだ同じシークレットがあれば消す（クリップボードの履歴を取る道具に、種を残さないため）。
 存在しないフォルダ名を入れると rbw が新しく作る。
 保存した項目は bw-autotype の一覧で「直前の項目」として先頭に出る。
 共通部分は lib/bwcommon.py、設定は ~/.config/bw-autotype/config.toml。
@@ -24,6 +27,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import bwcommon as bw  # noqa: E402
+import bwvault  # noqa: E402
 
 import gi  # noqa: E402
 
@@ -153,6 +157,9 @@ class Form:
                                      tr("（なし）", "(none)"))
         self.uri = self._text(grid, "URI", f"https://{host}" if host else "",
                               tr("例: https://github.com（空でもよい）", "e.g. https://github.com (optional)"))
+        self.totp = self._secret(grid, "TOTP", tr("シークレット（任意。サイトの「セットアップキー」を貼る）",
+                                                   "Secret (optional; paste the site's setup key)")) \
+            if bwvault.totp_supported() else None
         self.length = self._number(grid, tr("長さ", "Length"))
         self.finish_password = next((i for i, f in enumerate(FINISH) if f[1] == NEW["finish"]), 0)
         self.finish = self._choice(grid, tr("入力の仕方", "Then"), [f[0] for f in FINISH], None,
@@ -248,6 +255,33 @@ class Form:
         row = self._row(parent, label)
         e = self._entry_field(row, text, placeholder)
         return self._register({"kind": "text", "row": row, "entry": e, "focus": e})
+
+    def _secret(self, parent, label, placeholder):
+        """伏せ字の入力欄（貼ったシークレットを画面に出さない）。右端の目で表示を切り替え、入れるたびに、貼り間違いを右に知らせる。
+        日本語入力が全角の文字を入れないよう、パスワード用の入力にする"""
+        f = self._text(parent, label, "", placeholder)
+        e = f["entry"]
+        e.set_visibility(False)
+        e.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        e.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, "view-reveal-symbolic")
+        e.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY, tr("表示切替", "Show / hide"))
+        e.connect("icon-press", lambda w, _pos: w.set_visibility(not w.get_visibility()))
+        f["note"] = Gtk.Label(xalign=0, css_classes=["bw-hint"])
+        f["row"].append(f["note"])
+        e.connect("changed", lambda *_: self._totp_changed())
+        return f
+
+    def _totp_changed(self):
+        text = self.totp["entry"].get_text()
+        problem = bwvault.totp_problem(text)
+        note = self.totp["note"]
+        (note.add_css_class if problem else note.remove_css_class)("bw-warn")
+        if problem:
+            note.set_label("× " + problem)
+        elif bwvault.totp_clean(text):
+            note.set_label(tr(f"✓ {len(bwvault.totp_clean(text))} 文字", f"✓ {len(bwvault.totp_clean(text))} chars"))
+        else:
+            note.set_label("")
 
     def _candidates(self, parent, label, options, text, placeholder):
         row = self._row(parent, label)
@@ -350,7 +384,7 @@ class Form:
         ssh = self.is_ssh()
         if ssh != self.ssh_mode:
             self.ssh_mode = ssh
-            for f in (self.user, self.uri, self.length):
+            for f in (self.user, self.uri, self.length, *([self.totp] if self.totp else [])):
                 f["row"].set_visible(not ssh)
             dd = self.finish["dd"]
             if ssh:
@@ -512,7 +546,18 @@ class Form:
             self.warn.set_label(tr("パスワードを生成できていません（作り直してください）",
                                    "No password was generated (regenerate it)"))
             return
-        self.result = {"kind": "password", "how": FINISH[self.finish["dd"].get_selected()][1],
+        totp = ""
+        if self.totp is not None:
+            problem = bwvault.totp_problem(self.totp["entry"].get_text())
+            if problem:
+                self.warn.set_label(tr("TOTP のシークレット: ", "TOTP secret: ") + problem)
+                if VIM:
+                    self._goto(self.fields.index(self.totp))
+                else:      # 標準モードでは、_goto が vim 用の案内を出し、行にフォーカスを置いてしまうので、入力欄に戻すだけにする
+                    self.totp["entry"].grab_focus()
+                return
+            totp = bwvault.totp_clean(self.totp["entry"].get_text())
+        self.result = {"kind": "password", "how": FINISH[self.finish["dd"].get_selected()][1], "totp": totp,
                        "password": self.password, "name": name, "folder": folder,
                        "user": self.user["entry"].get_text().strip(), "uri": self.uri["entry"].get_text().strip()}
         self.win.get_application().quit()
@@ -566,6 +611,19 @@ def make_ssh_key():
     return private, public, fingerprint
 
 
+def forget_clipboard_seed(totp):
+    """貼り付けたシークレットが、まだクリップボードにあれば消す（別のものをコピーしていたら、触らない）"""
+    wl_paste = bw.which_real("wl-paste") or "wl-paste"
+    wl_copy = bw.which_real("wl-copy") or "wl-copy"
+    try:
+        r = bw.run([wl_paste, "-n"], timeout=3)
+        if r.returncode == 0 and bwvault.totp_clean(r.stdout) == totp:
+            subprocess.run([wl_copy, "--clear"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+            bw.log("new: cleared the clipboard (it still held the TOTP secret)")
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
 def save_ssh_key(win, result):
     """SSH キーを作って保管庫に保存し、公開鍵を入力・コピーする"""
     import bwvault
@@ -613,16 +671,22 @@ def main():
         return save_ssh_key(win, result)
     password, how, name, user, folder, uri = (result[k] for k in ("password", "how", "name", "user", "folder", "uri"))
 
-    cmd = ["rbw", "add", name] + ([user] if user else [])
-    if uri:
-        cmd += ["--uri", uri]
-    if folder:
-        cmd += ["--folder", folder]
-    r = bw.run(cmd, input=password + "\n")     # 標準入力で渡す（1行目がパスワード）
+    totp = result.get("totp", "")
+    if totp:
+        r = bwvault.save_login_with_totp(name, user, uri, folder, password, totp)     # パスワードと種は標準入力で渡す
+    else:
+        cmd = ["rbw", "add", name] + ([user] if user else [])
+        if uri:
+            cmd += ["--uri", uri]
+        if folder:
+            cmd += ["--folder", folder]
+        r = bw.run(cmd, input=password + "\n")     # 標準入力で渡す（1行目がパスワード）
     if r.returncode != 0:
         bw.notify(tr("保存に失敗しました: ", "Could not save: ") + r.stderr.strip()[:200], urgent=True)
         return 1
-    bw.log(f"new: saved (name length {len(name)})")
+    bw.log(f"new: saved (name length {len(name)}{', with totp' if totp else ''})")
+    if totp:
+        forget_clipboard_seed(totp)
 
     # Super+Alt+P の一覧で、この項目を「直前の項目」として先頭に出す
     h = bw.entry_hash(name, folder, user)
