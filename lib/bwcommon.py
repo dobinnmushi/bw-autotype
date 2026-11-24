@@ -293,9 +293,9 @@ def wait_focus(win_id, seconds=3.0):
 
 # ---- ブラウザの表示中のページ ----
 # wm_class の先頭 → AT-SPI でのアプリ名
-BROWSERS = {"firefox": "Firefox", "google-chrome": "Google Chrome", "chromium": "Chromium",
+BROWSERS = {"firefox": "Firefox", "floorp": "Floorp", "google-chrome": "Google Chrome", "chromium": "Chromium",
             "brave-browser": "Brave Browser"}
-BROWSER_SUFFIX = re.compile(r"\s+[—-]\s+(Mozilla Firefox|Google Chrome|Chromium|Brave)$")
+BROWSER_SUFFIX = re.compile(r"\s+[—-]\s+(Mozilla Firefox|Ablaze Floorp|Google Chrome|Chromium|Brave)$")
 
 
 def browser_app(win):
