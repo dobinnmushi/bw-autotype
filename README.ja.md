@@ -124,7 +124,7 @@ rofi-rbw 自体の設定は `config/rofi-rbw.rc`。`autotype.selector = "rofi"` 
 - 記録: `journalctl -t bw-autotype`（本人確認の経路と保存の有無だけ。認証情報は書かない）。
 
 ## bw-vault と一緒に使う（任意）
-[bw-vault](https://github.com/dobinnmushi/bw-vault)（姉妹品。公開予定）は、保管庫の鍵を別のユーザー（`bwvault`）に置き、
+[bw-vault](https://github.com/dobinnmushi/bw-vault)（姉妹品）は、保管庫の鍵を別のユーザー（`bwvault`）に置き、
 秘密を出す前に polkit（指紋、だめなら `sudo` と同じパスワード）で本人確認をする。bw-autotype は、あっても無くても動き、
 自動で切り替わる。こちらの書き換えは要らない。
 

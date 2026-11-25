@@ -85,8 +85,18 @@ length disappear, and the key is created when you save (`ssh-keygen` in `$XDG_RU
 saved to the vault as an SSH key item, and its public key is typed into the focused field (for example GitHub's
 "New SSH key" box), copied, or only saved. The private key goes only to the vault.
 
-The form works with the mouse, with standard keys (Tab / Enter / Esc), or — with `new.keys = "vim"` — modal
-Vim-like keys (J/K field, j/k option, i edit, p paste, v show, r regenerate, Enter save, q cancel).
+The form works entirely with the mouse. By default the keys are the usual ones (Tab to move, Enter to save, Esc to cancel).
+With `new.keys = "vim"` it uses Vim-like modal keys:
+
+| Mode | Key | Action |
+|---|---|---|
+| Normal | J / K | move between fields |
+| | j / k | change the option or candidate (for the length, k is +1 and j is −1) |
+| | i | type text |
+| | p | paste the first line of the clipboard at the cursor |
+| | v / r | show or hide the password / regenerate it |
+| | Enter / q | save and run / cancel |
+| Insert | Esc or Enter | back to Normal mode |
 
 Both are also in the Activities overview as "Bitwarden Autotype" and "Bitwarden New Login".
 
@@ -120,7 +130,7 @@ rofi-rbw's own options are in `config/rofi-rbw.rc`. With `autotype.selector = "r
 - Logs: `journalctl -t bw-autotype` (which identity check was used and whether something was saved; no secrets).
 
 ## With bw-vault (optional)
-[bw-vault](https://github.com/dobinnmushi/bw-vault) (companion, to be published) keeps the vault key under a separate
+[bw-vault](https://github.com/dobinnmushi/bw-vault) (companion) keeps the vault key under a separate
 user (`bwvault`) and asks polkit — your fingerprint, then your password, like `sudo` — before every secret leaves it.
 bw-autotype works with or without it and switches by itself; nothing here needs to be rewritten.
 
